@@ -7,6 +7,7 @@ from typing import TypeAlias, TypeVar
 
 from seis_attr_ssl.config.schema import (
 	DISALLOWED_PRETRAINING_KEYS,
+	EXPECTED_ATTRIBUTE_GROUPS,
 	EXPECTED_ATTRIBUTES,
 	EXPECTED_CONTEXT_CROP_SIZE,
 	EXPECTED_CONTEXT_DOWNSAMPLE,
@@ -14,6 +15,7 @@ from seis_attr_ssl.config.schema import (
 	EXPECTED_LOCAL_CROP_SIZE,
 	EXPECTED_VOLUME_FORMAT,
 	F3_ALLOWED_STAGES,
+	KNOWN_STAGES,
 )
 
 Config: TypeAlias = dict[str, object]
@@ -26,7 +28,8 @@ def validate_config(config: _T) -> _T:
 		msg = 'config must be a mapping'
 		raise TypeError(msg)
 
-	if config.get('stage') not in F3_ALLOWED_STAGES:
+	stage = _validate_stage(config)
+	if stage not in F3_ALLOWED_STAGES:
 		_reject_f3_pretraining_config(config)
 
 	data = _required_mapping(config, 'data')
@@ -58,6 +61,14 @@ def validate_config(config: _T) -> _T:
 	_validate_nopims_root(paths)
 
 	return config
+
+
+def _validate_stage(config: Mapping[str, object]) -> str:
+	stage = config.get('stage')
+	if stage not in KNOWN_STAGES:
+		msg = f'stage must be one of {sorted(KNOWN_STAGES)!r}; got {stage!r}'
+		raise ValueError(msg)
+	return str(stage)
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -112,15 +123,8 @@ def _validate_attributes(attributes: Mapping[str, object]) -> None:
 		msg = 'attributes.names must be a list of attribute names'
 		raise ValueError(msg)
 
-	expected = set(EXPECTED_ATTRIBUTES)
-	actual = set(names)
-	missing = sorted(expected - actual)
-	extra = sorted(actual - expected)
-	if missing or extra or len(names) != len(EXPECTED_ATTRIBUTES):
-		msg = (
-			'attributes.names must contain exactly the MVP attribute set; '
-			f'missing={missing!r}, extra={extra!r}'
-		)
+	if names != EXPECTED_ATTRIBUTES:
+		msg = f'attributes.names must equal {EXPECTED_ATTRIBUTES!r}; got {names!r}'
 		raise ValueError(msg)
 
 	groups = attributes.get('groups')
@@ -128,11 +132,10 @@ def _validate_attributes(attributes: Mapping[str, object]) -> None:
 		msg = 'attributes.groups must be a mapping'
 		raise TypeError(msg)
 
-	missing_groups = sorted(name for name in names if name not in groups)
-	if missing_groups:
+	if groups != EXPECTED_ATTRIBUTE_GROUPS:
 		msg = (
-			'attributes.groups must cover all attributes.names; '
-			f'missing={missing_groups!r}'
+			'attributes.groups must equal the MVP attribute group mapping; '
+			f'got {dict(groups)!r}'
 		)
 		raise ValueError(msg)
 
