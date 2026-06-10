@@ -1,0 +1,77 @@
+project:
+  name: SeisAttrSSL
+  package: seis_attr_ssl
+
+paths:
+  nopims_root: /home/dcuser/data/NOPIMS/
+  output_root: runs
+
+data:
+  grid_order: [x, y, z]
+  volume_format: npy_memmap
+  base_seismic_kind: dip_steered_median_filtered
+  local_crop_size: [128, 128, 128]
+  context_crop_size: [512, 512, 512]
+  context_downsample: 4
+  use_context: true
+
+attributes:
+  names:
+    - amplitude_norm
+    - phase_sin
+    - phase_cos
+    - instantaneous_frequency
+    - spectral_low_ratio
+    - spectral_mid_ratio
+    - spectral_high_ratio
+    - coherence
+    - glcm_contrast
+    - glcm_homogeneity
+  groups:
+    amplitude_norm: waveform
+    phase_sin: phase
+    phase_cos: phase
+    instantaneous_frequency: frequency
+    spectral_low_ratio: spectral
+    spectral_mid_ratio: spectral
+    spectral_high_ratio: spectral
+    coherence: discontinuity
+    glcm_contrast: texture
+    glcm_homogeneity: texture
+
+normalization:
+  pre_attribute:
+    clipping_percentiles: [0.5, 99.5]
+    center: median
+    scale: iqr
+    epsilon: 1.0e-6
+    smooth_time_depth_trend_correction: false
+    trace_wise_agc: false
+    patch_wise_zscore: false
+
+stage: generate_attributes
+
+attribute_generation:
+  write_dtype: float32
+  overwrite: false
+  output_subdir: attributes
+  phase:
+    axis: z
+  instantaneous_frequency:
+    axis: z
+    clipping_percentiles: [1.0, 99.0]
+  spectral_ratio:
+    effective_band_threshold: 0.10
+    bands: split_effective_band_into_three_equal_parts
+    epsilon: 1.0e-6
+  coherence:
+    method: local_similarity
+    window_size_xyz: [9, 9, 9]
+    output_range: [0.0, 1.0]
+  glcm:
+    levels: 32
+    window_size_xyz: [9, 9, 9]
+    offsets_xyz:
+      - [1, 0, 0]
+      - [0, 1, 0]
+      - [0, 0, 1]

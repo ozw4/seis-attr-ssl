@@ -1,0 +1,61 @@
+project:
+  name: SeisAttrSSL
+  package: seis_attr_ssl
+
+paths:
+  nopims_root: /home/dcuser/data/NOPIMS/
+  output_root: runs
+
+data:
+  grid_order: [x, y, z]
+  volume_format: npy_memmap
+  base_seismic_kind: dip_steered_median_filtered
+  local_crop_size: [128, 128, 128]
+  context_crop_size: [512, 512, 512]
+  context_downsample: 4
+  use_context: true
+
+attributes:
+  names:
+    - amplitude_norm
+    - phase_sin
+    - phase_cos
+    - instantaneous_frequency
+    - spectral_low_ratio
+    - spectral_mid_ratio
+    - spectral_high_ratio
+    - coherence
+    - glcm_contrast
+    - glcm_homogeneity
+  groups:
+    amplitude_norm: waveform
+    phase_sin: phase
+    phase_cos: phase
+    instantaneous_frequency: frequency
+    spectral_low_ratio: spectral
+    spectral_mid_ratio: spectral
+    spectral_high_ratio: spectral
+    coherence: discontinuity
+    glcm_contrast: texture
+    glcm_homogeneity: texture
+
+normalization:
+  pre_attribute:
+    clipping_percentiles: [0.5, 99.5]
+    center: median
+    scale: iqr
+    epsilon: 1.0e-6
+    smooth_time_depth_trend_correction: false
+    trace_wise_agc: false
+    patch_wise_zscore: false
+
+stage: build_nopims_manifests
+
+manifest:
+  output_dir: /home/dcuser/data/NOPIMS/manifests/
+  scan_pattern: "**/*.npy"
+  require_base_seismic: true
+  base_seismic_name_hints:
+    - dip
+    - median
+    - filtered
