@@ -45,3 +45,7 @@ debug_*/
 *.pt
 *patch
 *.db
+.work
+.work/
+vendor/issue_forge
+vendor/issue_forge/
