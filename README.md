@@ -1,4 +1,13 @@
-# seis-attr-ssl
+# SeisAttrSSL
+
+## Development
+
+```bash
+python -m pip install -e .[dev]
+pytest
+python -m compileall src proc
+python proc/train_mae.py --dry-run
+```
 
 ## Documentation
 
