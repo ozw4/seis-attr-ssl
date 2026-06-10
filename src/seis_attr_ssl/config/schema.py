@@ -39,3 +39,4 @@ EXPECTED_ATTRIBUTE_GROUPS: Final = {
 }
 
 DISALLOWED_PRETRAINING_KEYS: Final = {'f3', 'f3_root', 'f3_dataset', 'f3_data'}
+F3_ALLOWED_STAGES: Final = {'finetune_f3', 'eval_f3'}

@@ -49,39 +49,44 @@ normalization:
     trace_wise_agc: false
     patch_wise_zscore: false
 
-stage: pretrain_mae
+stage: finetune_f3
 
-masking:
-  spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
-  block_size_tokens: [2, 2, 2]
-  min_input_attributes: 4
-  max_input_attributes: 10
-  attribute_dropout_prob: 0.30
-  group_dropout_prob: 0.20
+f3:
+  data_root: null
+  labels_root: null
+  split:
+    method: spatial_holdout
+    axis: x
+  few_label_protocols:
+    - one_inline
+    - three_inlines
+    - five_inlines
+    - sparse_points_per_class
 
 model:
-  name: strict_attribute_set_mae3d
-  patch_size: [8, 8, 8]
-  encoder_dim: 384
-  encoder_depth: 8
-  encoder_heads: 6
-  decoder_dim: 256
-  decoder_depth: 4
-  decoder_heads: 4
-  num_context_tokens: 8
+  init_from_dense_adapt: null
+  num_classes: null
+  prototype_head: true
 
 loss:
-  reconstruction: huber
-  huber_delta: 1.0
-  dropped_attribute_weight: 0.25
-  gradient_weight: 0.05
-  family_balanced: true
+  sparse_ce_weight: 1.0
+  prototype_weight: 0.25
+  subset_consistency_weight: 0.10
+  smoothness_weight: 0.05
 
 train:
   batch_size: 1
   epochs: 100
-  lr: 1.0e-4
-  weight_decay: 0.05
+  schedule:
+    - stage: train_head
+      freeze_encoder: true
+      freeze_decoder: true
+    - stage: train_decoder
+      freeze_encoder: true
+      freeze_decoder: false
+    - stage: train_last_encoder_blocks
+      unfreeze_last_blocks: 2
+    - stage: full_finetune
+      encoder_lr_scale: 0.1
   amp: true
   seed: 42

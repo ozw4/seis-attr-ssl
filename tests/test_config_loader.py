@@ -7,17 +7,43 @@ import pytest
 
 from seis_attr_ssl.config import load_config, validate_config
 
+DEFAULT_CONFIGS = [
+	Path('proc/configs/build_nopims_manifests.yaml'),
+	Path('proc/configs/generate_attributes_nopims.yaml'),
+	Path('proc/configs/mvp_mae.yaml'),
+	Path('proc/configs/mvp_dense_adapt.yaml'),
+	Path('proc/configs/mvp_finetune_f3.yaml'),
+	Path('proc/configs/mvp_eval_f3.yaml'),
+]
+
 
 def test_loads_valid_mvp_config() -> None:
 	cfg = load_config(Path('proc/configs/mvp_mae.yaml'))
 
 	validate_config(cfg)
 
+	assert cfg['stage'] == 'pretrain_mae'
 	assert cfg['project']['package'] == 'seis_attr_ssl'
 	assert cfg['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS/'
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
 	assert len(cfg['attributes']['names']) == 10
+
+
+@pytest.mark.parametrize('config_path', DEFAULT_CONFIGS)
+def test_default_mvp_configs_load_and_validate(config_path: Path) -> None:
+	cfg = load_config(config_path)
+
+	validate_config(cfg)
+
+	assert cfg['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS/'
+	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
+	assert (
+		cfg['normalization']['pre_attribute'][
+			'smooth_time_depth_trend_correction'
+		]
+		is False
+	)
 
 
 def test_load_config_applies_nopims_root_default(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@ from seis_attr_ssl.config.schema import (
 	EXPECTED_GRID_ORDER,
 	EXPECTED_LOCAL_CROP_SIZE,
 	EXPECTED_VOLUME_FORMAT,
+	F3_ALLOWED_STAGES,
 )
 
 Config: TypeAlias = dict[str, object]
@@ -25,7 +26,8 @@ def validate_config(config: _T) -> _T:
 		msg = 'config must be a mapping'
 		raise TypeError(msg)
 
-	_reject_f3_pretraining_config(config)
+	if config.get('stage') not in F3_ALLOWED_STAGES:
+		_reject_f3_pretraining_config(config)
 
 	data = _required_mapping(config, 'data')
 	_validate_equal(data, 'grid_order', EXPECTED_GRID_ORDER)

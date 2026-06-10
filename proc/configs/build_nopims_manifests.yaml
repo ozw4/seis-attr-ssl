@@ -49,39 +49,13 @@ normalization:
     trace_wise_agc: false
     patch_wise_zscore: false
 
-stage: pretrain_mae
+stage: build_nopims_manifests
 
-masking:
-  spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
-  block_size_tokens: [2, 2, 2]
-  min_input_attributes: 4
-  max_input_attributes: 10
-  attribute_dropout_prob: 0.30
-  group_dropout_prob: 0.20
-
-model:
-  name: strict_attribute_set_mae3d
-  patch_size: [8, 8, 8]
-  encoder_dim: 384
-  encoder_depth: 8
-  encoder_heads: 6
-  decoder_dim: 256
-  decoder_depth: 4
-  decoder_heads: 4
-  num_context_tokens: 8
-
-loss:
-  reconstruction: huber
-  huber_delta: 1.0
-  dropped_attribute_weight: 0.25
-  gradient_weight: 0.05
-  family_balanced: true
-
-train:
-  batch_size: 1
-  epochs: 100
-  lr: 1.0e-4
-  weight_decay: 0.05
-  amp: true
-  seed: 42
+manifest:
+  output_dir: /home/dcuser/data/NOPIMS/manifests/
+  scan_pattern: "**/*.npy"
+  require_base_seismic: true
+  base_seismic_name_hints:
+    - dip
+    - median
+    - filtered
