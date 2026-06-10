@@ -35,6 +35,8 @@ Thumbs.db
 *.json
 *.npz
 data/
+!src/seis_attr_ssl/data/
+!src/seis_attr_ssl/data/__init__.py
 result/
 tmp_code/
 debug_*/

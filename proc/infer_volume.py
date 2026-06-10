@@ -11,7 +11,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from seis_attr_ssl.utils.cli import run_config_entrypoint  # noqa: E402
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent / 'configs' / 'mvp_eval_f3.yaml'
+DEFAULT_CONFIG = Path(__file__).resolve().parent / 'configs' / 'mvp_infer_volume.yaml'
 
 
 def main() -> None:

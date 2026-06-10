@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from seis_attr_ssl.config import load_config, validate_config
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_CONFIGS = [
 	Path('proc/configs/build_nopims_manifests.yaml'),
@@ -14,6 +18,7 @@ DEFAULT_CONFIGS = [
 	Path('proc/configs/mvp_dense_adapt.yaml'),
 	Path('proc/configs/mvp_finetune_f3.yaml'),
 	Path('proc/configs/mvp_eval_f3.yaml'),
+	Path('proc/configs/mvp_infer_volume.yaml'),
 ]
 
 
@@ -95,6 +100,7 @@ normalization:
     smooth_time_depth_trend_correction: false
     trace_wise_agc: false
     patch_wise_zscore: false
+stage: pretrain_mae
 """,
 		encoding='utf-8',
 	)
@@ -135,6 +141,57 @@ def test_missing_attribute_group_raises_clear_value_error() -> None:
 	del cfg['attributes']['groups']['coherence']
 
 	with pytest.raises(ValueError, match='attributes\\.groups'):
+		validate_config(cfg)
+
+
+def test_mvp_infer_volume_config_loads_and_validates() -> None:
+	cfg = load_config(Path('proc/configs/mvp_infer_volume.yaml'))
+
+	validate_config(cfg)
+
+	assert cfg['stage'] == 'infer_volume'
+	assert cfg['model']['output_probabilities'] is True
+	assert cfg['inference']['output_dir'] == 'runs/inference'
+
+
+def test_infer_volume_dry_run_prints_infer_volume_stage() -> None:
+	result = subprocess.run(  # noqa: S603
+		[sys.executable, str(PROJECT_ROOT / 'proc/infer_volume.py'), '--dry-run'],
+		check=False,
+		capture_output=True,
+		text=True,
+		cwd=PROJECT_ROOT,
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'stage: infer_volume' in result.stdout
+
+
+def test_reordered_attribute_names_raise_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['attributes']['names'] = [
+		'phase_sin',
+		'amplitude_norm',
+		*cfg['attributes']['names'][2:],
+	]
+
+	with pytest.raises(ValueError, match='attributes\\.names'):
+		validate_config(cfg)
+
+
+def test_changed_attribute_group_value_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['attributes']['groups']['coherence'] = 'texture'
+
+	with pytest.raises(ValueError, match='attributes\\.groups'):
+		validate_config(cfg)
+
+
+def test_unknown_stage_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['stage'] = 'unknown_stage'
+
+	with pytest.raises(ValueError, match='stage'):
 		validate_config(cfg)
 
 
