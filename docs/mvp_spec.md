@@ -174,6 +174,20 @@ C. external strict MAE pretrain -> external dense adaptation -> F3 few-label fin
 
 Path C is compared against path A as the primary result.
 
+Stage 1 strict MAE pretraining defaults in `proc/configs/mvp_mae.yaml` are set
+for initial NOPIMS-scale pretraining:
+
+```yaml
+train:
+  batch_size: 1
+  samples_per_epoch: 10000
+  num_workers: 4
+  shuffle: true
+```
+
+Synthetic smoke-test configs may override these training values to use shorter
+epochs or single-process loading.
+
 ## 8. F3 Evaluation Protocol
 
 F3 must not be included in pretraining data. F3 is used only for few-label seismic facies fine-tuning and held-out evaluation.

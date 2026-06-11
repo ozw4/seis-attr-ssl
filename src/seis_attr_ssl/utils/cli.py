@@ -71,6 +71,12 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 	)
 	if 'batch_size' in train:
 		rows.append(('train.batch_size', train.get('batch_size')))
+	if 'samples_per_epoch' in train:
+		rows.append(('train.samples_per_epoch', train.get('samples_per_epoch')))
+	if 'num_workers' in train:
+		rows.append(('train.num_workers', train.get('num_workers')))
+	if 'shuffle' in train:
+		rows.append(('train.shuffle', train.get('shuffle')))
 	if 'epochs' in train:
 		rows.append(('train.epochs', train.get('epochs')))
 	if 'device' in train:
@@ -112,6 +118,8 @@ def _count(value: object) -> int:
 
 
 def _format_value(value: object) -> str:
+	if isinstance(value, bool):
+		return str(value).lower()
 	if isinstance(value, list):
 		return ', '.join(str(item) for item in value)
 	if value is None:

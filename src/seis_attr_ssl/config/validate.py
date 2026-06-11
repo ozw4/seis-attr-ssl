@@ -182,6 +182,12 @@ def _validate_masking(masking: Mapping[str, object]) -> None:
 def _validate_train(train: Mapping[str, object]) -> None:
 	if 'max_steps' in train:
 		_validate_positive_int(train, 'max_steps', prefix='train')
+	if 'samples_per_epoch' in train:
+		_validate_positive_int(train, 'samples_per_epoch', prefix='train')
+	if 'num_workers' in train:
+		_validate_nonnegative_int(train, 'num_workers', prefix='train')
+	if 'shuffle' in train:
+		_validate_bool(train, 'shuffle', prefix='train')
 
 
 def _validate_probability(parent: Mapping[str, object], key: str) -> float:
@@ -211,6 +217,36 @@ def _validate_positive_int(
 		msg = f'{prefix}.{key} must be positive; got {count!r}'
 		raise ValueError(msg)
 	return count
+
+
+def _validate_nonnegative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> int:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{prefix}.{key} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	count = int(value)
+	if count < 0:
+		msg = f'{prefix}.{key} must be nonnegative; got {count!r}'
+		raise ValueError(msg)
+	return count
+
+
+def _validate_bool(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> bool:
+	value = parent.get(key)
+	if not isinstance(value, bool):
+		msg = f'{prefix}.{key} must be a bool; got {value!r}'
+		raise TypeError(msg)
+	return value
 
 
 def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:

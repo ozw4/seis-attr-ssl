@@ -61,6 +61,9 @@ def test_train_mae_dry_run_prints_masking_settings() -> None:
 	assert 'masking.spatial_mask_ratio: 0.75' in result.stdout
 	assert 'masking.spatial_mask_mode: block' in result.stdout
 	assert 'masking.block_size_tokens: 2, 2, 2' in result.stdout
+	assert 'train.samples_per_epoch: 10000' in result.stdout
+	assert 'train.num_workers: 4' in result.stdout
+	assert 'train.shuffle: true' in result.stdout
 
 
 @pytest.mark.parametrize(

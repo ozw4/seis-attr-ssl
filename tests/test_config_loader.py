@@ -33,6 +33,9 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
 	assert len(cfg['attributes']['names']) == 10
+	assert cfg['train']['samples_per_epoch'] == 10000
+	assert cfg['train']['num_workers'] == 4
+	assert cfg['train']['shuffle'] is True
 
 
 @pytest.mark.parametrize('config_path', DEFAULT_CONFIGS)
@@ -225,6 +228,29 @@ def test_invalid_masking_attribute_bounds_raise_clear_value_error() -> None:
 	cfg['masking']['max_input_attributes'] = 10
 
 	with pytest.raises(ValueError, match='masking\\.min_input_attributes'):
+		validate_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('key', 'value', 'error_type', 'match'),
+	[
+		('samples_per_epoch', 0, ValueError, 'train\\.samples_per_epoch'),
+		('samples_per_epoch', True, TypeError, 'train\\.samples_per_epoch'),
+		('num_workers', -1, ValueError, 'train\\.num_workers'),
+		('num_workers', False, TypeError, 'train\\.num_workers'),
+		('shuffle', 'true', TypeError, 'train\\.shuffle'),
+	],
+)
+def test_invalid_train_runtime_fields_raise_clear_error(
+	key: str,
+	value: object,
+	error_type: type[Exception],
+	match: str,
+) -> None:
+	cfg = _valid_config()
+	cfg['train'][key] = value
+
+	with pytest.raises(error_type, match=match):
 		validate_config(cfg)
 
 

@@ -53,6 +53,11 @@ epoch. When it is omitted, the dataset length defaults to the number of survey
 manifests, but each item is still an epoch-specific random crop sample rather
 than a fixed survey-only record.
 
+For NOPIMS-scale Stage 1 pretraining, `proc/configs/mvp_mae.yaml` defaults to
+`train.samples_per_epoch: 10000`, `train.num_workers: 4`, and
+`train.shuffle: true`. Small synthetic smoke-test configs can override these
+values to keep local runs lightweight.
+
 ## Model
 
 `StrictAttributeSetMAE3D` implements the pretraining model:
