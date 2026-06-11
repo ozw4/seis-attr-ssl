@@ -46,3 +46,18 @@ def test_proc_script_dry_run_exits_zero_and_prints_stage(
 
 	assert result.returncode == 0, result.stderr
 	assert 'stage:' in result.stdout
+
+
+def test_train_mae_dry_run_prints_masking_settings() -> None:
+	result = subprocess.run(  # noqa: S603
+		[sys.executable, str(PROJECT_ROOT / 'proc/train_mae.py'), '--dry-run'],
+		check=False,
+		capture_output=True,
+		text=True,
+		cwd=PROJECT_ROOT,
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'masking.spatial_mask_ratio: 0.75' in result.stdout
+	assert 'masking.spatial_mask_mode: block' in result.stdout
+	assert 'masking.block_size_tokens: 2, 2, 2' in result.stdout

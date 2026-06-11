@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
 
 from seis_attr_ssl.config.schema import (
@@ -59,6 +60,9 @@ def validate_config(config: _T) -> _T:
 
 	paths = _required_mapping(config, 'paths')
 	_validate_nopims_root(paths)
+
+	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
+		_validate_masking(_required_mapping(config, 'masking'))
 
 	return config
 
@@ -147,6 +151,70 @@ def _validate_nopims_root(paths: Mapping[str, object]) -> None:
 	if not isinstance(nopims_root, str):
 		msg = f'paths.nopims_root must be a string; got {nopims_root!r}'
 		raise TypeError(msg)
+
+
+def _validate_masking(masking: Mapping[str, object]) -> None:
+	_validate_probability(masking, 'spatial_mask_ratio')
+	_validate_equal(masking, 'spatial_mask_mode', 'block', prefix='masking')
+	_validate_xyz_positive_ints(masking, 'block_size_tokens')
+	min_input_attributes = _validate_positive_int(
+		masking,
+		'min_input_attributes',
+	)
+	max_input_attributes = _validate_positive_int(
+		masking,
+		'max_input_attributes',
+	)
+	if min_input_attributes > max_input_attributes:
+		msg = (
+			'masking.min_input_attributes must be less than or equal to '
+			'masking.max_input_attributes'
+		)
+		raise ValueError(msg)
+	_validate_probability(masking, 'attribute_dropout_prob')
+	_validate_probability(masking, 'group_dropout_prob')
+
+
+def _validate_probability(parent: Mapping[str, object], key: str) -> float:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'masking.{key} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	probability = float(value)
+	if not 0.0 <= probability < 1.0:
+		msg = f'masking.{key} must be in [0, 1); got {probability!r}'
+		raise ValueError(msg)
+	return probability
+
+
+def _validate_positive_int(parent: Mapping[str, object], key: str) -> int:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'masking.{key} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	count = int(value)
+	if count <= 0:
+		msg = f'masking.{key} must be positive; got {count!r}'
+		raise ValueError(msg)
+	return count
+
+
+def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:
+	value = parent.get(key)
+	if (
+		isinstance(value, str)
+		or not isinstance(value, list)
+		or len(value) != 3
+		or any(
+			isinstance(item, bool) or not isinstance(item, Integral)
+			for item in value
+		)
+	):
+		msg = f'masking.{key} must be a length-3 integer list; got {value!r}'
+		raise TypeError(msg)
+	if any(int(item) <= 0 for item in value):
+		msg = f'masking.{key} values must be positive; got {value!r}'
+		raise ValueError(msg)
 
 
 def _reject_f3_pretraining_config(value: object, path: str = 'config') -> None:
