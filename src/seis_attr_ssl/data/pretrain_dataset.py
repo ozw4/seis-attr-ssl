@@ -10,7 +10,8 @@ import numpy as np
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.attributes.on_the_fly import (
-	generate_mvp_attribute,
+	generate_mvp_attributes,
+	normalize_base_seismic,
 )
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
@@ -311,14 +312,11 @@ class NopimsAttributePretrainDataset:
 				local_request.size_xyz,
 			)
 			stats = self._stats_for_manifest(manifest)
-			for spec in self.registry.specs:
-				target[spec.id] = generate_mvp_attribute(
-					base_crop,
-					spec.name,
-					stats,
-				)
-				target_valid[spec.id] = True
-			return target, target_valid, local_valid_mask
+			result = generate_mvp_attributes(
+				normalize_base_seismic(base_crop, stats),
+				valid_mask=local_valid_mask,
+			)
+			return result.attributes, result.attribute_valid, result.voxel_valid_mask
 
 		for spec in self.registry.specs:
 			record = manifest.attribute_volumes.get(spec.name)
@@ -359,21 +357,19 @@ class NopimsAttributePretrainDataset:
 				context_request.size_xyz,
 			)
 			stats = self._stats_for_manifest(manifest)
-			context_volumes = []
-			context_valid_mask = None
-			for id_ in input_ids:
-				attribute = generate_mvp_attribute(base_crop, id_, stats)
-				context_volume, attribute_valid_mask = downsample_context_masked_mean(
-					attribute,
-					valid_mask,
-					self.context_downsample,
-				)
-				context_volumes.append(context_volume)
-				if context_valid_mask is None:
-					context_valid_mask = attribute_valid_mask
+			normalized_context, context_valid_mask = downsample_context_masked_mean(
+				normalize_base_seismic(base_crop, stats),
+				valid_mask,
+				self.context_downsample,
+			)
+			context_result = generate_mvp_attributes(
+				normalized_context,
+				valid_mask=context_valid_mask,
+			)
+			ids = np.asarray(input_ids, dtype=np.int64)
 			return (
-				np.stack(context_volumes, axis=0).astype(np.float32, copy=False),
-				context_valid_mask,
+				context_result.attributes[ids].astype(np.float32, copy=False),
+				context_result.voxel_valid_mask,
 			)
 
 		context_volumes: list[np.ndarray] = []

@@ -6,6 +6,11 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+	from seis_attr_ssl.data.attribute_generation import (
+		AttributeGenerationConfig,
+		AttributeGenerationResult,
+		generate_mvp_attributes,
+	)
 	from seis_attr_ssl.data.attribute_subset import (
 		AMPLITUDE_ATTRIBUTE_ID,
 		MVP_ATTRIBUTE_IDS,
@@ -60,6 +65,8 @@ __all__ = [
 	'BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED',
 	'GRID_ORDER_XYZ',
 	'MVP_ATTRIBUTE_IDS',
+	'AttributeGenerationConfig',
+	'AttributeGenerationResult',
 	'AttributeVolumeRecord',
 	'BaseSeismicVolumeRecord',
 	'CropRequest',
@@ -77,6 +84,7 @@ __all__ = [
 	'compute_centered_start',
 	'compute_normalization_stats',
 	'downsample_context_mean',
+	'generate_mvp_attributes',
 	'inspect_npy_volume',
 	'load_normalization_stats',
 	'make_context_request',
@@ -115,6 +123,12 @@ _ATTRIBUTE_SUBSET_EXPORTS = {
 	'AMPLITUDE_ATTRIBUTE_ID',
 	'MVP_ATTRIBUTE_IDS',
 	'sample_attribute_subset',
+}
+
+_ATTRIBUTE_GENERATION_EXPORTS = {
+	'AttributeGenerationConfig',
+	'AttributeGenerationResult',
+	'generate_mvp_attributes',
 }
 
 _DOWNSAMPLE_EXPORTS = {
@@ -157,6 +171,10 @@ _VOLUME_STORE_EXPORTS = {
 _EXPORT_MODULES = {
 	**dict.fromkeys(_MANIFEST_BUILDER_EXPORTS, 'seis_attr_ssl.data.manifest_builder'),
 	**dict.fromkeys(_CROP_SAMPLER_EXPORTS, 'seis_attr_ssl.data.crop_sampler'),
+	**dict.fromkeys(
+		_ATTRIBUTE_GENERATION_EXPORTS,
+		'seis_attr_ssl.data.attribute_generation',
+	),
 	**dict.fromkeys(_ATTRIBUTE_SUBSET_EXPORTS, 'seis_attr_ssl.data.attribute_subset'),
 	**dict.fromkeys(_DOWNSAMPLE_EXPORTS, 'seis_attr_ssl.data.downsample'),
 	**dict.fromkeys(_NORMALIZATION_EXPORTS, 'seis_attr_ssl.data.normalization'),
