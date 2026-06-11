@@ -4,18 +4,21 @@ MVP attributes are generated on the fly during dataset sampling from
 survey-wise robust normalized source seismic crops. The source seismic is the
 dip-steered median filtered `.npy` memmap recorded in the base-seismic manifest.
 
-The local crop is `[128, 128, 128]`. The context crop is `[512, 512, 512]`,
-downsampled by 4 to `[128, 128, 128]` before context attributes are generated.
-Attribute generation uses a local halo of `[16, 16, 64]` around the payload
-crop. Context attribute generation uses a halo of `[8, 8, 16]` on the
-downsampled context grid; in source-space coordinates that halo is multiplied
-by `context_downsample`.
+The local crop is `[128, 128, 128]`. The context payload crop is
+`[512, 512, 512]`, downsampled by 4 to `[128, 128, 128]`. Attribute generation
+uses a local halo of `[16, 16, 64]` around the payload crop. Context attribute
+generation uses a halo of `[8, 8, 16]` on the downsampled context grid; in
+source-space coordinates that halo is multiplied by `context_downsample`.
+With the production defaults, the context source compute crop is
+`[576, 576, 640]`, the low-resolution compute crop is `[144, 144, 160]`, and
+only the center `[128, 128, 128]` payload is returned.
 
 Halo-aware on-the-fly generation uses this order:
 
 ```text
 base seismic compute crop + halo
   -> survey-wise normalization
+  -> downsample context crops when building context attributes
   -> generate attributes on compute crop
   -> center trim to payload crop
   -> attribute subset dropout / spatial mask

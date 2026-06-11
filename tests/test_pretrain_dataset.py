@@ -10,6 +10,7 @@ from seis_attr_ssl.config import load_config
 from seis_attr_ssl.data import (
 	AttributeVolumeRecord,
 	BaseSeismicVolumeRecord,
+	CropRequest,
 	SurveyManifest,
 )
 from seis_attr_ssl.data.attribute_subset import sample_attribute_subset
@@ -357,6 +358,7 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.require_full_halo_inside_volume is True
 	assert dataset.context_crop_size_xyz == (512, 512, 512)
 	assert dataset.context_downsample == 4
+	assert dataset.context_attribute_halo_xyz == (8, 8, 16)
 	assert dataset.use_context is True
 	assert dataset.patch_size_xyz == (8, 8, 8)
 	assert dataset.spatial_mask_ratio == 0.75
@@ -367,6 +369,109 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.attribute_dropout_prob == 0.30
 	assert dataset.group_dropout_prob == 0.20
 	assert dataset.seed == 42
+
+
+def test_pretrain_dataset_context_compute_request_uses_lowres_halo(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(1024, 1024, 1024),
+	)
+	dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(128, 128, 128),
+		context_crop_size_xyz=(512, 512, 512),
+		context_downsample=4,
+		context_attribute_halo_xyz=(8, 8, 16),
+	)
+	local_request = CropRequest(
+		survey_id='survey-a',
+		start_xyz=(256, 256, 256),
+		size_xyz=(128, 128, 128),
+		context_size_xyz=None,
+		context_downsample=1,
+	)
+
+	_, compute_request, lowres_payload_slices = dataset._context_requests(  # noqa: SLF001
+		local_request,
+	)
+
+	assert compute_request.size_xyz == (576, 576, 640)
+	assert tuple(
+		size // dataset.context_downsample
+		for size in compute_request.size_xyz
+	) == (144, 144, 160)
+	assert lowres_payload_slices == (
+		slice(8, 136),
+		slice(8, 136),
+		slice(16, 144),
+	)
+
+
+def test_pretrain_dataset_context_halo_trims_to_payload_mask(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', shape_xyz=(12, 12, 12))
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		context_attribute_halo_xyz=(1, 1, 2),
+		patch_size_xyz=(4, 4, 4),
+		min_input_attributes=2,
+		max_input_attributes=2,
+	)
+
+	sample = dataset[0]
+
+	assert sample['context'].shape == (2, 4, 4, 4)
+	assert sample['context_valid_mask'].shape == (4, 4, 4)
+	assert sample['coords']['context_attribute_halo_xyz'] == (1, 1, 2)
+	assert sample['coords']['context_compute_size_xyz'] == (12, 12, 16)
+	assert sample['coords']['context_lowres_compute_size_xyz'] == (6, 6, 8)
+
+
+def test_pretrain_dataset_zero_context_halo_keeps_payload_request(
+	tmp_path: Path,
+) -> None:
+	names = MVP_ATTRIBUTE_REGISTRY.names[:2]
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		names,
+		shape_xyz=(8, 8, 8),
+		fill_value=3.0,
+	)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		context_attribute_halo_xyz=(0, 0, 0),
+		patch_size_xyz=(4, 4, 4),
+		min_input_attributes=2,
+		max_input_attributes=2,
+	)
+
+	sample = dataset[0]
+
+	assert sample['context'].shape == (2, 4, 4, 4)
+	assert sample['context_valid_mask'].shape == (4, 4, 4)
+	assert sample['coords']['context_compute_size_xyz'] == (8, 8, 8)
+	assert sample['coords']['context_lowres_compute_size_xyz'] == (4, 4, 4)
+	np.testing.assert_array_equal(
+		sample['context'][:, sample['context_valid_mask']],
+		np.full((2, int(sample['context_valid_mask'].sum())), 3.0, dtype=np.float32),
+	)
+	np.testing.assert_array_equal(
+		sample['context'][:, np.logical_not(sample['context_valid_mask'])],
+		np.zeros(
+			(2, int(np.logical_not(sample['context_valid_mask']).sum())),
+			dtype=np.float32,
+		),
+	)
 
 
 def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) -> None:

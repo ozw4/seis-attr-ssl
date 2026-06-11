@@ -52,7 +52,10 @@ require_full_halo_inside_volume: true
 
 The local halo is in source-grid `[x, y, z]` coordinates. The context halo is
 defined on the downsampled context grid, so its source-space margin is
-`context_attribute_halo * context_downsample`. Tests may use smaller crops and
+`context_attribute_halo * context_downsample`. With the production defaults,
+context attributes are generated on a source compute crop of
+`[576, 576, 640]`, downsampled to `[144, 144, 160]`, and then center-trimmed
+to the `[128, 128, 128]` context payload. Tests may use smaller crops and
 volumes, and small synthetic volumes may fall back to ordinary crop sampling
 when the full halo margin cannot fit. NOPIMS production pretraining assumes the
 full halo fits inside the sampled volume.
@@ -130,7 +133,7 @@ valid_attributes: validity flags for x channels, bool
 target_valid: validity flags for target channels, bool
 coords: survey ID, local payload start/size, local halo, compute start/size, and crop settings
 context: selected on-the-fly context attributes after downsampling, [C, X, Y, Z], float32, or None
-context_valid_mask: downsampled context validity mask, [X, Y, Z], bool, or None
+context_valid_mask: payload-only downsampled context validity mask, [X, Y, Z], bool, or None
 local_valid_mask: local crop validity mask, [X, Y, Z], bool
 ```
 

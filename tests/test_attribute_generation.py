@@ -182,7 +182,9 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	target_calls: list[
 		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
 	] = []
-	context_calls: list[tuple[int, int, int]] = []
+	context_calls: list[
+		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
+	] = []
 
 	def fake_generate_for_payload(
 		amp_norm: np.ndarray,
@@ -192,14 +194,25 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		config: object | None = None,
 	) -> AttributeGenerationResult:
 		del config
-		target_calls.append((amp_norm.shape, payload_slices_xyz))
-		assert amp_norm.shape == (36, 36, 132)
-		assert payload_slices_xyz == (
-			slice(16, 20),
-			slice(16, 20),
-			slice(64, 68),
+		if amp_norm.shape == (36, 36, 132):
+			target_calls.append((amp_norm.shape, payload_slices_xyz))
+			assert payload_slices_xyz == (
+				slice(16, 20),
+				slice(16, 20),
+				slice(64, 68),
+			)
+		else:
+			context_calls.append((amp_norm.shape, payload_slices_xyz))
+			assert amp_norm.shape == (20, 20, 36)
+			assert payload_slices_xyz == (
+				slice(8, 12),
+				slice(8, 12),
+				slice(16, 20),
+			)
+		payload_shape = tuple(
+			payload_slice.stop - payload_slice.start
+			for payload_slice in payload_slices_xyz
 		)
-		payload_shape = (4, 4, 4)
 		mask = (
 			np.ones(payload_shape, dtype=bool)
 			if valid_mask is None
@@ -218,36 +231,9 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 			voxel_valid_mask=mask,
 		)
 
-	def fake_generate(
-		amp_norm: np.ndarray,
-		*,
-		valid_mask: np.ndarray | None = None,
-		config: object | None = None,
-	) -> AttributeGenerationResult:
-		del config
-		context_calls.append(amp_norm.shape)
-		assert amp_norm.shape == (4, 4, 4)
-		mask = np.ones(amp_norm.shape, dtype=bool) if valid_mask is None else valid_mask
-		attributes = np.stack(
-			[
-				np.full(amp_norm.shape, spec.id, dtype=np.float32)
-				for spec in MVP_ATTRIBUTE_REGISTRY.specs
-			],
-			axis=0,
-		)
-		return AttributeGenerationResult(
-			attributes=attributes,
-			attribute_valid=np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
-			voxel_valid_mask=mask,
-		)
-
 	monkeypatch.setattr(
 		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes_for_payload',
 		fake_generate_for_payload,
-	)
-	monkeypatch.setattr(
-		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes',
-		fake_generate,
 	)
 	dataset = NopimsAttributePretrainDataset(
 		[manifest],
@@ -268,7 +254,12 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 			(slice(16, 20), slice(16, 20), slice(64, 68)),
 		),
 	]
-	assert context_calls == [(4, 4, 4)]
+	assert context_calls == [
+		(
+			(20, 20, 36),
+			(slice(8, 12), slice(8, 12), slice(16, 20)),
+		),
+	]
 	assert sample['context'].shape == (2, 4, 4, 4)
 
 
