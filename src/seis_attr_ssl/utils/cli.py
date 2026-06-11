@@ -45,6 +45,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 		('stage', cfg.get('stage')),
 		('project.name', project.get('name')),
 		('paths.nopims_root', paths.get('nopims_root')),
+		('paths.output_root', paths.get('output_root')),
 		('data.grid_order', data.get('grid_order')),
 		('data.local_crop_size', data.get('local_crop_size')),
 		('data.context_crop_size', data.get('context_crop_size')),
@@ -72,6 +73,10 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 		rows.append(('train.batch_size', train.get('batch_size')))
 	if 'epochs' in train:
 		rows.append(('train.epochs', train.get('epochs')))
+	if 'device' in train:
+		rows.append(('train.device', train.get('device')))
+	if 'max_steps' in train:
+		rows.append(('train.max_steps', train.get('max_steps')))
 
 	for key, value in rows:
 		print(f'{key}: {_format_value(value)}')

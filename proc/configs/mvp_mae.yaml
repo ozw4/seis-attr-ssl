@@ -87,4 +87,5 @@ train:
   lr: 1.0e-4
   weight_decay: 0.05
   amp: true
+  device: auto
   seed: 42

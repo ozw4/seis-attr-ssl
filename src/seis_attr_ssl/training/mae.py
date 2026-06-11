@@ -43,6 +43,7 @@ def train_mae_one_epoch(  # noqa: PLR0913
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
 	global_step: int = 0,
+	max_steps: int | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
@@ -50,6 +51,8 @@ def train_mae_one_epoch(  # noqa: PLR0913
 	batches = 0
 
 	for raw_batch in dataloader:
+		if max_steps is not None and batches >= max_steps:
+			break
 		batch = move_batch_to_device(raw_batch, device)
 		optimizer.zero_grad(set_to_none=True)
 
@@ -154,9 +157,16 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 
 	output_root = Path(_str_config(paths_config, 'output_root'))
 	epochs = _int_config(train_config, 'epochs', 1)
+	max_steps = _optional_int_config(train_config, 'max_steps')
 	state: MaeTrainingState | None = None
 	checkpoint_path: Path | None = None
 	for epoch in range(1, epochs + 1):
+		remaining_steps = None
+		if max_steps is not None:
+			previous_steps = 0 if state is None else state.global_step
+			remaining_steps = max_steps - previous_steps
+			if remaining_steps <= 0:
+				break
 		state = train_mae_one_epoch(
 			model=model,
 			dataloader=dataloader,
@@ -168,6 +178,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			amp_enabled=amp_enabled,
 			scaler=scaler,
 			global_step=0 if state is None else state.global_step,
+			max_steps=remaining_steps,
 		)
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_path = save_checkpoint(
@@ -179,6 +190,8 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			package_version=getattr(seis_attr_ssl, '__version__', None),
 			metrics={**state.metrics, 'amp_enabled': float(state.amp_enabled)},
 		)
+		if max_steps is not None and state.global_step >= max_steps:
+			break
 
 	if checkpoint_path is None:
 		msg = 'train.epochs must be positive'
@@ -208,16 +221,28 @@ def _build_model(
 
 def _manifest_train_path(config: Mapping[str, object]) -> Path:
 	manifests = _mapping(config, 'manifests')
-	return Path(_str_config(manifests, 'train'))
+	path = Path(_str_config(manifests, 'train'))
+	if not path.is_file():
+		msg = (
+			f'manifests.train does not exist: {path}. '
+			'Build NOPIMS manifests with '
+			'`python proc/build_nopims_manifests.py --config '
+			'proc/configs/build_nopims_manifests.yaml`.'
+		)
+		raise FileNotFoundError(msg)
+	return path
 
 
 def _resolve_device(train_config: Mapping[str, object]) -> torch.device:
 	device_name = train_config.get('device')
-	if device_name is None:
+	if device_name is None or device_name == 'auto':
 		return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 	if not isinstance(device_name, str):
 		msg = f'train.device must be a string; got {device_name!r}'
 		raise TypeError(msg)
+	if device_name not in {'cpu', 'cuda'}:
+		msg = 'train.device must be "auto", "cpu", or "cuda"'
+		raise ValueError(msg)
 	device = torch.device(device_name)
 	if device.type == 'cuda' and not torch.cuda.is_available():
 		msg = 'train.device requested CUDA, but CUDA is not available'
