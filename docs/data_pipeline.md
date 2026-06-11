@@ -149,6 +149,7 @@ context_size_xyz
 context_attribute_halo_xyz
 context_compute_start_xyz
 context_compute_size_xyz
+context_lowres_compute_size_xyz
 context_downsample
 ```
 

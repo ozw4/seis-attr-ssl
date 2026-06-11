@@ -454,6 +454,75 @@ def test_pretrain_dataset_mvp_halo_sample_contract(
 	assert coords['context_downsample'] == 4
 
 
+def test_pretrain_dataset_full_halo_sampling_reserves_context_margin(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(576, 576, 640),
+	)
+
+	def fake_read_target(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+	) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		return (
+			np.zeros(
+				(len(MVP_ATTRIBUTE_REGISTRY.specs), 128, 128, 128),
+				dtype=np.float32,
+			),
+			np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+			np.ones((128, 128, 128), dtype=bool),
+		)
+
+	def fake_read_context(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+		input_ids: tuple[int, ...],
+	) -> tuple[np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		return (
+			np.zeros((len(input_ids), 128, 128, 128), dtype=np.float32),
+			np.ones((128, 128, 128), dtype=bool),
+		)
+
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_target',
+		fake_read_target,
+	)
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_context',
+		fake_read_context,
+	)
+	dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(128, 128, 128),
+		local_attribute_halo_xyz=(16, 16, 64),
+		require_full_halo_inside_volume=True,
+		context_crop_size_xyz=(512, 512, 512),
+		context_downsample=4,
+		context_attribute_halo_xyz=(8, 8, 16),
+		patch_size_xyz=(8, 8, 8),
+		min_input_attributes=4,
+		max_input_attributes=4,
+		seed=7,
+	)
+
+	coords = dataset[0]['coords']
+
+	assert coords['local_start_xyz'] == (224, 224, 256)
+	assert coords['context_compute_start_xyz'] == (0, 0, 0)
+	assert coords['context_compute_size_xyz'] == manifest.shape_xyz
+	assert coords['context_lowres_compute_size_xyz'] == (144, 144, 160)
+
+
 def test_pretrain_dataset_context_compute_request_uses_lowres_halo(
 	tmp_path: Path,
 ) -> None:

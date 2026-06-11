@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from numbers import Integral, Real
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -210,7 +210,7 @@ class NopimsAttributePretrainDataset:
 			local_request = sample_random_local_crop_with_margin(
 				manifest.shape_xyz,
 				self.local_crop_size_xyz,
-				self.local_attribute_halo_xyz,
+				self._sampling_margin_xyz(),
 				rng,
 			)
 		else:
@@ -475,10 +475,7 @@ class NopimsAttributePretrainDataset:
 			self.context_crop_size_xyz,
 			self.context_downsample,
 		)
-		source_halo_xyz = tuple(
-			halo_axis * self.context_downsample
-			for halo_axis in self.context_attribute_halo_xyz
-		)
+		source_halo_xyz = self._context_source_halo_xyz()
 		context_compute_request, _ = expand_request_with_halo(
 			context_request,
 			source_halo_xyz,
@@ -496,6 +493,38 @@ class NopimsAttributePretrainDataset:
 			context_compute_request,
 			lowres_payload_slices,
 		)
+
+	def _sampling_margin_xyz(self) -> XYZ:
+		if not self.use_context:
+			return self.local_attribute_halo_xyz
+
+		source_halo_xyz = self._context_source_halo_xyz()
+		axes = zip(
+			self.local_attribute_halo_xyz,
+			self.local_crop_size_xyz,
+			self.context_crop_size_xyz,
+			source_halo_xyz,
+			strict=True,
+		)
+		margin_xyz = tuple(
+			max(
+				local_halo,
+				_context_payload_margin_axis(
+					local_size,
+					context_size,
+					source_halo,
+				),
+			)
+			for local_halo, local_size, context_size, source_halo in axes
+		)
+		return cast('XYZ', margin_xyz)
+
+	def _context_source_halo_xyz(self) -> XYZ:
+		source_halo_xyz = tuple(
+			halo_axis * self.context_downsample
+			for halo_axis in self.context_attribute_halo_xyz
+		)
+		return cast('XYZ', source_halo_xyz)
 
 	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:
 		if manifest.base_seismic is None:
@@ -628,6 +657,25 @@ def _validate_context_geometry(
 			f'got {context_output!r} and {local_crop_size_xyz!r}'
 		)
 		raise ValueError(msg)
+
+
+def _context_payload_margin_axis(
+	local_size_axis: int,
+	context_size_axis: int,
+	source_halo_axis: int,
+) -> int:
+	lower_margin = (
+		context_size_axis // 2
+		+ source_halo_axis
+		- local_size_axis // 2
+	)
+	upper_margin = (
+		context_size_axis
+		- context_size_axis // 2
+		+ source_halo_axis
+		- (local_size_axis - local_size_axis // 2)
+	)
+	return max(0, lower_margin, upper_margin)
 
 
 __all__ = ['NopimsAttributePretrainDataset']
