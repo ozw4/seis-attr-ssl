@@ -13,4 +13,5 @@ python proc/train_mae.py --dry-run
 ## Documentation
 
 - [MVP specification](docs/mvp_spec.md)
+- [Masking contract](docs/masking.md)
 - See [docs/data_pipeline.md](docs/data_pipeline.md) for the NOPIMS manifest and pretraining sample contract.
