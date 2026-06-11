@@ -162,3 +162,8 @@ def test_base_seismic_manifest_rejects_invalid_entry() -> None:
 	payload['shape_xyz'] = [8, 0, 10]
 	with pytest.raises(ValueError, match='shape_xyz'):
 		survey_manifest_from_dict(payload)
+
+	payload['shape_xyz'] = [8, 9, 10]
+	payload['dtype'] = 'float64'
+	with pytest.raises(ValueError, match='dtype'):
+		survey_manifest_from_dict(payload)

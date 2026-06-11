@@ -8,6 +8,7 @@ from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
 
 from seis_attr_ssl.config.schema import (
+	BASE_SEISMIC_REQUIRED_STAGES,
 	DISALLOWED_PRETRAINING_KEYS,
 	EXPECTED_ATTRIBUTE_GROUPS,
 	EXPECTED_ATTRIBUTES,
@@ -38,7 +39,8 @@ def validate_config(config: _T) -> _T:
 	data = _required_mapping(config, 'data')
 	_validate_equal(data, 'grid_order', EXPECTED_GRID_ORDER)
 	_validate_equal(data, 'volume_format', EXPECTED_VOLUME_FORMAT)
-	_validate_equal(data, 'base_seismic_kind', EXPECTED_BASE_SEISMIC_KIND)
+	if stage in BASE_SEISMIC_REQUIRED_STAGES or 'base_seismic_kind' in data:
+		_validate_equal(data, 'base_seismic_kind', EXPECTED_BASE_SEISMIC_KIND)
 	_validate_optional_npy_path(data, 'base_seismic_path')
 	_validate_equal(data, 'local_crop_size', EXPECTED_LOCAL_CROP_SIZE)
 	_validate_equal(data, 'context_crop_size', EXPECTED_CONTEXT_CROP_SIZE)

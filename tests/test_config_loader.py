@@ -141,6 +141,21 @@ def test_invalid_base_seismic_path_raises_clear_value_error() -> None:
 		validate_config(cfg)
 
 
+def test_base_seismic_kind_is_not_required_for_f3_stage() -> None:
+	cfg = load_config(Path('proc/configs/mvp_finetune_f3.yaml'))
+	del cfg['data']['base_seismic_kind']
+
+	validate_config(cfg)
+
+
+def test_base_seismic_kind_is_required_for_pretraining_stage() -> None:
+	cfg = _valid_config()
+	del cfg['data']['base_seismic_kind']
+
+	with pytest.raises(ValueError, match='data\\.base_seismic_kind'):
+		validate_config(cfg)
+
+
 def test_invalid_crop_downsample_combination_raises_clear_value_error() -> None:
 	cfg = _valid_config()
 	cfg['data']['context_crop_size'] = [256, 512, 512]

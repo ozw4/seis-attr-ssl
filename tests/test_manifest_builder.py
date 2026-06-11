@@ -33,6 +33,28 @@ def _write_volume(
 	return path
 
 
+def _write_stats(root: Path, source_path: Path) -> Path:
+	path = root / 'normalization_stats.json'
+	path.write_text(
+		(
+			'{'
+			f'"survey_id": "{root.name}", '
+			f'"source_path": "{source_path}", '
+			'"grid_order": ["x", "y", "z"], '
+			'"clip_low_percentile": 0.5, '
+			'"clip_high_percentile": 99.5, '
+			'"clip_low": 0.0, '
+			'"clip_high": 1.0, '
+			'"median": 0.0, '
+			'"iqr": 1.0, '
+			'"eps": 1.0e-6'
+			'}'
+		),
+		encoding='utf-8',
+	)
+	return path
+
+
 def test_build_nopims_manifests_writes_ordered_manifest(tmp_path: Path) -> None:
 	nopims_root = tmp_path / 'NOPIMS'
 	_write_volume(nopims_root, 'survey_b', 'attributes/amplitude_norm.npy')
@@ -113,15 +135,12 @@ def test_require_all_attributes_raises_for_incomplete_survey(tmp_path: Path) -> 
 
 def test_build_base_seismic_manifests_writes_source_manifest(tmp_path: Path) -> None:
 	nopims_root = tmp_path / 'NOPIMS'
-	_write_volume(
+	seismic_path = _write_volume(
 		nopims_root,
 		'survey_a',
 		'seismic/dip_steered_median_filtered.npy',
 	)
-	(nopims_root / 'survey_a' / 'normalization_stats.json').write_text(
-		'{"center": 0.0, "scale": 1.0}',
-		encoding='utf-8',
-	)
+	_write_stats(nopims_root / 'survey_a', seismic_path)
 	output_path = tmp_path / 'manifests' / 'nopims_base_seismic_manifests.json'
 
 	manifests = build_nopims_base_seismic_manifests(
@@ -155,11 +174,12 @@ def test_base_seismic_scan_raises_for_duplicate_survey_source(
 
 def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	nopims_root = tmp_path / 'NOPIMS'
-	_write_volume(nopims_root, 'survey_a', 'seismic/dip_median_filtered.npy')
-	(nopims_root / 'survey_a' / 'normalization_stats.json').write_text(
-		'{"center": 0.0, "scale": 1.0}',
-		encoding='utf-8',
+	seismic_path = _write_volume(
+		nopims_root,
+		'survey_a',
+		'seismic/dip_median_filtered.npy',
 	)
+	_write_stats(nopims_root / 'survey_a', seismic_path)
 	output_dir = tmp_path / 'manifests'
 	config = load_config(PROJECT_ROOT / 'proc/configs/build_nopims_manifests.yaml')
 	config['paths']['nopims_root'] = str(nopims_root)
@@ -178,3 +198,17 @@ def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	assert output_path.is_file()
 	assert read_manifest_json(output_path)[0].survey_id == 'survey_a'
 	assert 'manifest.base_seismic_count: 1' in result.stdout
+
+
+def test_base_seismic_scan_rejects_non_float32_source(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	seismic_path = _write_volume(
+		nopims_root,
+		'survey_a',
+		'seismic/dip_steered_median_filtered.npy',
+		dtype='float64',
+	)
+	_write_stats(nopims_root / 'survey_a', seismic_path)
+
+	with pytest.raises(ValueError, match='dtype'):
+		scan_nopims_base_seismic_manifests(nopims_root, '**/*.npy')

@@ -12,6 +12,14 @@ EXPECTED_BASE_SEISMIC_KIND: Final = 'dip_steered_median_filtered'
 EXPECTED_LOCAL_CROP_SIZE: Final = [128, 128, 128]
 EXPECTED_CONTEXT_CROP_SIZE: Final = [512, 512, 512]
 EXPECTED_CONTEXT_DOWNSAMPLE: Final = 4
+BASE_SEISMIC_REQUIRED_STAGES: Final = {
+	'build_nopims_manifests',
+	'prepare_normalization_stats',
+	'generate_attributes',
+	'pretrain_mae',
+	'dense_adaptation',
+	'infer_volume',
+}
 
 EXPECTED_ATTRIBUTES: Final = [
 	'amplitude_norm',

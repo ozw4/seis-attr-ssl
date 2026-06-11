@@ -12,6 +12,7 @@ from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 
 GRID_ORDER_XYZ: tuple[str, str, str] = ('x', 'y', 'z')
 BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED = 'dip_steered_median_filtered'
+BASE_SEISMIC_DTYPE_FLOAT32 = 'float32'
 TensorLike: TypeAlias = object
 
 
@@ -39,6 +40,12 @@ class BaseSeismicVolumeRecord:
 				'base_seismic_kind must be '
 				f'{BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED!r}; got '
 				f'{self.kind!r}'
+			)
+			raise ValueError(msg)
+		if self.dtype != BASE_SEISMIC_DTYPE_FLOAT32:
+			msg = (
+				f'base_seismic dtype must be {BASE_SEISMIC_DTYPE_FLOAT32!r}; '
+				f'got {self.dtype!r}'
 			)
 			raise ValueError(msg)
 
