@@ -107,27 +107,63 @@ class AttributePatchTokenizer3D(nn.Module):
 			(int(x_size), int(y_size), int(z_size)),
 			self.patch_size_xyz,
 		)[:3]
+		if not valid_mask.all():
+			return {
+				'tokens': self._tokenize_padded_attributes(
+					x,
+					safe_attribute_ids,
+					valid_mask,
+				),
+				'token_grid_shape': grid_shape,
+			}
+
+		tokens = self._tokenize_dense_attributes(x, safe_attribute_ids)
+		return {'tokens': tokens, 'token_grid_shape': grid_shape}
+
+	def _tokenize_dense_attributes(
+		self,
+		x: torch.Tensor,
+		attribute_ids: torch.Tensor,
+	) -> torch.Tensor:
 		patches = patchify_3d(x, self.patch_size_xyz)
 		attribute_tokens = self.patch_projection(patches)
 		attribute_tokens = attribute_tokens + self.attribute_embedding(
-			safe_attribute_ids,
+			attribute_ids,
 		).unsqueeze(1)
 
 		if self.group_embedding is not None:
-			group_ids = self.attribute_group_ids.to(safe_attribute_ids.device)[
-				safe_attribute_ids
+			group_ids = self.attribute_group_ids.to(attribute_ids.device)[
+				attribute_ids
 			]
-			group_tokens = self.group_embedding(group_ids).unsqueeze(1)
-			attribute_tokens = attribute_tokens + group_tokens
+			attribute_tokens = attribute_tokens + self.group_embedding(
+				group_ids,
+			).unsqueeze(1)
 
-		weights = valid_mask.to(dtype=attribute_tokens.dtype).view(
-			batch_size,
-			1,
-			channels,
-			1,
-		)
-		tokens = (attribute_tokens * weights).sum(dim=2) / weights.sum(dim=2)
-		return {'tokens': tokens, 'token_grid_shape': grid_shape}
+		return attribute_tokens.mean(dim=2)
+
+	def _tokenize_padded_attributes(
+		self,
+		x: torch.Tensor,
+		attribute_ids: torch.Tensor,
+		valid_mask: torch.Tensor,
+	) -> torch.Tensor:
+		sample_tokens = []
+		for sample_x, sample_attribute_ids, sample_valid_mask in zip(
+			x,
+			attribute_ids,
+			valid_mask,
+			strict=True,
+		):
+			valid_x = sample_x[sample_valid_mask].unsqueeze(0)
+			valid_attribute_ids = sample_attribute_ids[sample_valid_mask].unsqueeze(0)
+			valid_tokens = self._tokenize_dense_attributes(
+				valid_x,
+				valid_attribute_ids,
+			)
+			sample_tokens.append(
+				valid_tokens.squeeze(0),
+			)
+		return torch.stack(sample_tokens, dim=0)
 
 
 def _validate_patch_size(patch_size_xyz: tuple[int, int, int]) -> int:

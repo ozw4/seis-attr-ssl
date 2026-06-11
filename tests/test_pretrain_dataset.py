@@ -261,6 +261,14 @@ def test_pretrain_dataset_requires_base_normalization_stats(tmp_path: Path) -> N
 		_dataset(manifest, use_context=False)
 
 
+def test_pretrain_dataset_requires_base_seismic_file(tmp_path: Path) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a')
+	(manifest.root / 'dip_steered_median_filtered.npy').unlink()
+
+	with pytest.raises(FileNotFoundError, match='base seismic file'):
+		_dataset(manifest, use_context=False)
+
+
 def test_pretrain_dataset_default_mae_spatial_mask_shape_and_ratio(
 	tmp_path: Path,
 ) -> None:

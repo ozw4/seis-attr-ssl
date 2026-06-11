@@ -259,6 +259,13 @@ class NopimsAttributePretrainDataset:
 		for manifest in self.manifests:
 			manifest.validate_consistent_shapes()
 			if manifest.base_seismic is not None:
+				base_path = _resolve_manifest_path(manifest, manifest.base_seismic.path)
+				if not base_path.is_file():
+					msg = (
+						f'survey {manifest.survey_id!r} base seismic file '
+						f'does not exist: {base_path}'
+					)
+					raise FileNotFoundError(msg)
 				stats_path = _resolve_manifest_path(
 					manifest,
 					manifest.base_seismic.normalization_stats_path,

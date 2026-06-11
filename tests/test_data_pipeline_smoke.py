@@ -7,8 +7,10 @@ import numpy as np
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.data import (
 	NopimsAttributePretrainDataset,
-	build_nopims_manifests,
+	build_nopims_base_seismic_manifests,
+	compute_normalization_stats,
 	read_manifest_json,
+	write_normalization_stats,
 )
 
 if TYPE_CHECKING:
@@ -39,23 +41,33 @@ EXPECTED_SAMPLE_KEYS = {
 
 def _build_synthetic_nopims_tree(root: Path) -> None:
 	for survey_index, survey_id in enumerate(('survey_001', 'survey_002')):
-		for spec in MVP_ATTRIBUTE_REGISTRY.specs:
-			path = root / survey_id / 'attributes' / f'{spec.name}.npy'
-			path.parent.mkdir(parents=True, exist_ok=True)
-			value = float(survey_index * len(MVP_ATTRIBUTE_REGISTRY.specs) + spec.id)
-			np.save(path, np.full(SHAPE_XYZ, value, dtype=np.float32))
+		path = root / survey_id / 'seismic' / 'dip_steered_median_filtered.npy'
+		path.parent.mkdir(parents=True, exist_ok=True)
+		volume = (
+			np.arange(np.prod(SHAPE_XYZ), dtype=np.float32).reshape(SHAPE_XYZ)
+			+ np.float32(survey_index)
+		)
+		np.save(path, volume)
+		stats = compute_normalization_stats(
+			path,
+			survey_id=survey_id,
+			max_samples=None,
+		)
+		write_normalization_stats(
+			stats,
+			root / survey_id / 'normalization_stats.json',
+		)
 
 
 def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: PLR0915
 	nopims_root = tmp_path / 'NOPIMS'
-	manifest_path = tmp_path / 'manifests' / 'nopims_manifests.json'
+	manifest_path = tmp_path / 'manifests' / 'nopims_base_seismic_manifests.json'
 	_build_synthetic_nopims_tree(nopims_root)
 
-	manifests = build_nopims_manifests(
+	manifests = build_nopims_base_seismic_manifests(
 		nopims_root=nopims_root,
 		output_path=manifest_path,
 		scan_pattern='**/*.npy',
-		require_all_attributes=True,
 	)
 	loaded_manifests = read_manifest_json(manifest_path)
 
@@ -65,7 +77,9 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		'survey_002',
 	]
 	for manifest in loaded_manifests:
-		assert tuple(manifest.attribute_volumes) == MVP_ATTRIBUTE_REGISTRY.names
+		assert manifest.base_seismic is not None
+		assert manifest.attribute_volumes == {}
+		assert manifest.missing_attributes() == ()
 		assert manifest.shape_xyz == SHAPE_XYZ
 
 	dataset = NopimsAttributePretrainDataset(
