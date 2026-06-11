@@ -179,7 +179,44 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	monkeypatch,
 ) -> None:
 	manifest = _write_base_manifest(tmp_path / 'survey-a', (8, 8, 8))
-	calls: list[tuple[int, int, int]] = []
+	target_calls: list[
+		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
+	] = []
+	context_calls: list[tuple[int, int, int]] = []
+
+	def fake_generate_for_payload(
+		amp_norm: np.ndarray,
+		payload_slices_xyz: tuple[slice, slice, slice],
+		*,
+		valid_mask: np.ndarray | None = None,
+		config: object | None = None,
+	) -> AttributeGenerationResult:
+		del config
+		target_calls.append((amp_norm.shape, payload_slices_xyz))
+		assert amp_norm.shape == (36, 36, 132)
+		assert payload_slices_xyz == (
+			slice(16, 20),
+			slice(16, 20),
+			slice(64, 68),
+		)
+		payload_shape = (4, 4, 4)
+		mask = (
+			np.ones(payload_shape, dtype=bool)
+			if valid_mask is None
+			else valid_mask[payload_slices_xyz]
+		)
+		attributes = np.stack(
+			[
+				np.full(payload_shape, spec.id, dtype=np.float32)
+				for spec in MVP_ATTRIBUTE_REGISTRY.specs
+			],
+			axis=0,
+		)
+		return AttributeGenerationResult(
+			attributes=attributes,
+			attribute_valid=np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+			voxel_valid_mask=mask,
+		)
 
 	def fake_generate(
 		amp_norm: np.ndarray,
@@ -188,7 +225,7 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		config: object | None = None,
 	) -> AttributeGenerationResult:
 		del config
-		calls.append(amp_norm.shape)
+		context_calls.append(amp_norm.shape)
 		assert amp_norm.shape == (4, 4, 4)
 		mask = np.ones(amp_norm.shape, dtype=bool) if valid_mask is None else valid_mask
 		attributes = np.stack(
@@ -204,6 +241,10 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 			voxel_valid_mask=mask,
 		)
 
+	monkeypatch.setattr(
+		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes_for_payload',
+		fake_generate_for_payload,
+	)
 	monkeypatch.setattr(
 		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes',
 		fake_generate,
@@ -221,7 +262,13 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 
 	sample = dataset[0]
 
-	assert calls == [(4, 4, 4), (4, 4, 4)]
+	assert target_calls == [
+		(
+			(36, 36, 132),
+			(slice(16, 20), slice(16, 20), slice(64, 68)),
+		),
+	]
+	assert context_calls == [(4, 4, 4)]
 	assert sample['context'].shape == (2, 4, 4, 4)
 
 

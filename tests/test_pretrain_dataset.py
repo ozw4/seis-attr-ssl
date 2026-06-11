@@ -253,6 +253,57 @@ def test_pretrain_dataset_generates_attributes_from_base_seismic(
 		np.testing.assert_array_equal(sample['x'][row], sample['target'][id_])
 
 
+def test_pretrain_dataset_reads_base_target_with_local_halo(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', shape_xyz=(10, 10, 10))
+	dataset = _dataset(
+		manifest,
+		use_context=False,
+		local_attribute_halo_xyz=(1, 1, 2),
+	)
+
+	sample = dataset[0]
+	coords = sample['coords']
+	local_start = coords['local_start_xyz']
+	local_compute_start = coords['local_compute_start_xyz']
+
+	assert sample['target'].shape == (len(MVP_ATTRIBUTE_REGISTRY.specs), *LOCAL_SIZE)
+	assert sample['x'].shape == (len(sample['attribute_ids']), *LOCAL_SIZE)
+	assert sample['local_valid_mask'].shape == LOCAL_SIZE
+	assert coords['local_attribute_halo_xyz'] == (1, 1, 2)
+	assert coords['local_compute_size_xyz'] == (6, 6, 8)
+	assert local_compute_start == (
+		local_start[0] - 1,
+		local_start[1] - 1,
+		local_start[2] - 2,
+	)
+	assert bool(sample['local_valid_mask'].all())
+	np.testing.assert_array_equal(
+		sample['target_valid'],
+		np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+	)
+
+
+def test_pretrain_dataset_halo_sampling_falls_back_for_small_base_volume(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', shape_xyz=(3, 3, 3))
+	dataset = _dataset(
+		manifest,
+		use_context=False,
+		local_crop_size_xyz=LOCAL_SIZE,
+		local_attribute_halo_xyz=(2, 2, 2),
+	)
+
+	sample = dataset[0]
+
+	assert sample['target'].shape == (len(MVP_ATTRIBUTE_REGISTRY.specs), *LOCAL_SIZE)
+	assert sample['local_valid_mask'].shape == LOCAL_SIZE
+	assert sample['coords']['local_compute_size_xyz'] == (8, 8, 8)
+	assert not bool(sample['local_valid_mask'].all())
+
+
 def test_pretrain_dataset_requires_base_normalization_stats(tmp_path: Path) -> None:
 	manifest = _write_base_manifest(tmp_path / 'survey-a')
 	(manifest.root / 'normalization_stats.json').unlink()
@@ -302,6 +353,8 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	dataset = NopimsAttributePretrainDataset.from_config([manifest], cfg)
 
 	assert dataset.local_crop_size_xyz == (128, 128, 128)
+	assert dataset.local_attribute_halo_xyz == (16, 16, 64)
+	assert dataset.require_full_halo_inside_volume is True
 	assert dataset.context_crop_size_xyz == (512, 512, 512)
 	assert dataset.context_downsample == 4
 	assert dataset.use_context is True

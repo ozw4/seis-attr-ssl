@@ -128,7 +128,7 @@ dropped_attribute_mask: valid targets withheld from input, bool
 target_attribute_ids: all stable MVP attribute IDs, int64
 valid_attributes: validity flags for x channels, bool
 target_valid: validity flags for target channels, bool
-coords: survey ID, local crop start and crop settings
+coords: survey ID, local payload start/size, local halo, compute start/size, and crop settings
 context: selected on-the-fly context attributes after downsampling, [C, X, Y, Z], float32, or None
 context_valid_mask: downsampled context validity mask, [X, Y, Z], bool, or None
 local_valid_mask: local crop validity mask, [X, Y, Z], bool
