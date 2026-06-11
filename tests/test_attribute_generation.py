@@ -3,13 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.data import (
 	AttributeGenerationResult,
 	BaseSeismicVolumeRecord,
 	SurveyManifest,
+	center_trim_attribute_result,
 	generate_mvp_attributes,
+	generate_mvp_attributes_for_payload,
 )
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 
@@ -77,6 +80,98 @@ def test_generate_mvp_attributes_zeroes_invalid_padded_voxels() -> None:
 	np.testing.assert_array_equal(result.voxel_valid_mask, valid_mask)
 	assert np.isfinite(result.attributes).all()
 	assert not result.attributes[:, ~valid_mask].any()
+
+
+def test_generate_mvp_attributes_for_payload_trims_compute_crop(monkeypatch) -> None:
+	compute_shape = (160, 160, 256)
+	payload_slices = (slice(16, 144), slice(16, 144), slice(64, 192))
+	amp = np.broadcast_to(np.zeros((1, 1, 1), dtype=np.float32), compute_shape)
+	valid_mask = np.ones(compute_shape, dtype=bool)
+
+	def fake_generate(
+		amp_norm: np.ndarray,
+		*,
+		valid_mask: np.ndarray | None = None,
+		config: object | None = None,
+	) -> AttributeGenerationResult:
+		del config
+		assert amp_norm.shape == compute_shape
+		assert valid_mask is not None
+		attributes = np.broadcast_to(
+			np.arange(10, dtype=np.float32).reshape(10, 1, 1, 1),
+			(10, *compute_shape),
+		)
+		return AttributeGenerationResult(
+			attributes=attributes,
+			attribute_valid=np.ones(10, dtype=bool),
+			voxel_valid_mask=valid_mask,
+		)
+
+	monkeypatch.setattr(
+		'seis_attr_ssl.attributes.on_the_fly.generate_mvp_attributes',
+		fake_generate,
+	)
+
+	result = generate_mvp_attributes_for_payload(
+		amp,
+		payload_slices,
+		valid_mask=valid_mask,
+	)
+
+	assert result.attributes.shape == (10, 128, 128, 128)
+	assert result.attributes.dtype == np.float32
+	assert result.voxel_valid_mask.shape == (128, 128, 128)
+	assert result.voxel_valid_mask.dtype == np.bool_
+	np.testing.assert_array_equal(result.attributes[:, 0, 0, 0], np.arange(10))
+
+
+def test_generate_mvp_attributes_for_payload_trims_valid_mask() -> None:
+	amp = np.arange(6 * 6 * 8, dtype=np.float32).reshape(6, 6, 8)
+	valid_mask = np.ones_like(amp, dtype=bool)
+	valid_mask[0] = False
+	valid_mask[2, 4, 5] = False
+	payload_slices = (slice(1, 5), slice(2, 6), slice(3, 7))
+
+	result = generate_mvp_attributes_for_payload(
+		amp,
+		payload_slices,
+		valid_mask=valid_mask,
+	)
+
+	assert result.attributes.shape == (10, 4, 4, 4)
+	assert result.voxel_valid_mask.shape == (4, 4, 4)
+	assert not result.voxel_valid_mask[1, 2, 2]
+	assert not result.attributes[:, 1, 2, 2].any()
+	np.testing.assert_array_equal(
+		result.voxel_valid_mask,
+		valid_mask[payload_slices],
+	)
+
+
+@pytest.mark.parametrize(
+	'payload_slices',
+	[
+		(slice(0, 2), slice(0, 2)),
+		(slice(None, 2), slice(0, 2), slice(0, 2)),
+		(slice(0, None), slice(0, 2), slice(0, 2)),
+		(slice(-1, 2), slice(0, 2), slice(0, 2)),
+		(slice(0, 5), slice(0, 2), slice(0, 2)),
+		(slice(1, 1), slice(0, 2), slice(0, 2)),
+		(slice(0, 2, 2), slice(0, 2), slice(0, 2)),
+		(0, slice(0, 2), slice(0, 2)),
+	],
+)
+def test_center_trim_attribute_result_rejects_invalid_slices(
+	payload_slices: tuple[slice, ...],
+) -> None:
+	result = AttributeGenerationResult(
+		attributes=np.ones((10, 4, 4, 4), dtype=np.float32),
+		attribute_valid=np.ones(10, dtype=bool),
+		voxel_valid_mask=np.ones((4, 4, 4), dtype=bool),
+	)
+
+	with pytest.raises(ValueError, match='payload_slices_xyz'):
+		center_trim_attribute_result(result, payload_slices)
 
 
 def test_pretrain_dataset_generates_context_attributes_after_downsampling(

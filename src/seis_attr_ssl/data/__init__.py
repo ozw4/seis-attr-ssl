@@ -9,7 +9,9 @@ if TYPE_CHECKING:
 	from seis_attr_ssl.data.attribute_generation import (
 		AttributeGenerationConfig,
 		AttributeGenerationResult,
+		center_trim_attribute_result,
 		generate_mvp_attributes,
+		generate_mvp_attributes_for_payload,
 	)
 	from seis_attr_ssl.data.attribute_subset import (
 		AMPLITUDE_ATTRIBUTE_ID,
@@ -81,10 +83,12 @@ __all__ = [
 	'UnlabeledPretrainingSample',
 	'build_nopims_base_seismic_manifests',
 	'build_nopims_manifests',
+	'center_trim_attribute_result',
 	'compute_centered_start',
 	'compute_normalization_stats',
 	'downsample_context_mean',
 	'generate_mvp_attributes',
+	'generate_mvp_attributes_for_payload',
 	'inspect_npy_volume',
 	'load_normalization_stats',
 	'make_context_request',
@@ -128,7 +132,9 @@ _ATTRIBUTE_SUBSET_EXPORTS = {
 _ATTRIBUTE_GENERATION_EXPORTS = {
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
+	'center_trim_attribute_result',
 	'generate_mvp_attributes',
+	'generate_mvp_attributes_for_payload',
 }
 
 _DOWNSAMPLE_EXPORTS = {

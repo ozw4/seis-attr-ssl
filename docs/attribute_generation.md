@@ -11,6 +11,19 @@ crop. Context attribute generation uses a halo of `[8, 8, 16]` on the
 downsampled context grid; in source-space coordinates that halo is multiplied
 by `context_downsample`.
 
+Halo-aware on-the-fly generation uses this order:
+
+```text
+base seismic compute crop + halo
+  -> survey-wise normalization
+  -> generate attributes on compute crop
+  -> center trim to payload crop
+  -> attribute subset dropout / spatial mask
+```
+
+Spatial masking is applied only after attribute generation and center trimming.
+Attributes must not be generated from spatially masked base seismic.
+
 Training samples require full halo coverage inside the volume whenever
 possible. Small synthetic test volumes may fall back to ordinary payload crop
 sampling when the full margin cannot fit; NOPIMS production pretraining assumes
