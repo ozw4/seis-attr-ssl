@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from copy import deepcopy
 from pathlib import Path
 
 import pytest
 
 from seis_attr_ssl.config import load_config, validate_config
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from tests.helpers import run_python_proc
 
 DEFAULT_CONFIGS = [
 	Path('proc/configs/build_nopims_manifests.yaml'),
@@ -158,13 +155,7 @@ def test_mvp_infer_volume_config_loads_and_validates() -> None:
 
 
 def test_infer_volume_dry_run_prints_infer_volume_stage() -> None:
-	result = subprocess.run(  # noqa: S603
-		[sys.executable, str(PROJECT_ROOT / 'proc/infer_volume.py'), '--dry-run'],
-		check=False,
-		capture_output=True,
-		text=True,
-		cwd=PROJECT_ROOT,
-	)
+	result = run_python_proc(Path('proc/infer_volume.py'), '--dry-run')
 
 	assert result.returncode == 0, result.stderr
 	assert 'stage: infer_volume' in result.stdout

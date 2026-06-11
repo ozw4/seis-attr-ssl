@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -14,8 +12,7 @@ from seis_attr_ssl.data import (
 	write_manifest_json,
 )
 from seis_attr_ssl.training import load_checkpoint
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+from tests.helpers import run_python_proc
 
 
 def test_train_mae_proc_one_step_cpu_run_writes_checkpoint(tmp_path: Path) -> None:
@@ -27,23 +24,16 @@ def test_train_mae_proc_one_step_cpu_run_writes_checkpoint(tmp_path: Path) -> No
 		encoding='utf-8',
 	)
 
-	result = subprocess.run(  # noqa: S603
-		[
-			sys.executable,
-			str(PROJECT_ROOT / 'proc/train_mae.py'),
-			'--config',
-			str(config_path),
-			'--device',
-			'cpu',
-			'--max-steps',
-			'1',
-			'--output-root',
-			str(output_root),
-		],
-		check=False,
-		capture_output=True,
-		text=True,
-		cwd=PROJECT_ROOT,
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		config_path,
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
+		'--output-root',
+		output_root,
 		timeout=120,
 	)
 
@@ -67,22 +57,14 @@ def test_train_mae_proc_missing_manifest_explains_how_to_build(
 		encoding='utf-8',
 	)
 
-	result = subprocess.run(  # noqa: S603
-		[
-			sys.executable,
-			str(PROJECT_ROOT / 'proc/train_mae.py'),
-			'--config',
-			str(config_path),
-			'--device',
-			'cpu',
-			'--max-steps',
-			'1',
-		],
-		check=False,
-		capture_output=True,
-		text=True,
-		cwd=PROJECT_ROOT,
-		timeout=30,
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		config_path,
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
 	)
 
 	assert result.returncode != 0
@@ -98,22 +80,14 @@ def test_train_mae_proc_missing_manifest_train_key_explains_how_to_build(
 	config_path = tmp_path / 'mae.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
 
-	result = subprocess.run(  # noqa: S603
-		[
-			sys.executable,
-			str(PROJECT_ROOT / 'proc/train_mae.py'),
-			'--config',
-			str(config_path),
-			'--device',
-			'cpu',
-			'--max-steps',
-			'1',
-		],
-		check=False,
-		capture_output=True,
-		text=True,
-		cwd=PROJECT_ROOT,
-		timeout=30,
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		config_path,
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
 	)
 
 	assert result.returncode != 0

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +13,7 @@ from seis_attr_ssl.data import (
 	read_manifest_json,
 	scan_nopims_manifests,
 )
+from tests.helpers import run_python_proc
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -120,17 +119,10 @@ def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	config_path = tmp_path / 'build_nopims_manifests.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
 
-	result = subprocess.run(  # noqa: S603
-		[
-			sys.executable,
-			str(PROJECT_ROOT / 'proc/build_nopims_manifests.py'),
-			'--config',
-			str(config_path),
-		],
-		check=False,
-		capture_output=True,
-		text=True,
-		cwd=PROJECT_ROOT,
+	result = run_python_proc(
+		Path('proc/build_nopims_manifests.py'),
+		'--config',
+		config_path,
 	)
 
 	assert result.returncode == 0, result.stderr
