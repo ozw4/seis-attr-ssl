@@ -245,5 +245,27 @@ def test_invalid_train_runtime_fields_raise_clear_error(
 		validate_config(cfg)
 
 
+@pytest.mark.parametrize(
+	('value', 'error_type'),
+	[
+		(0.0, ValueError),
+		(1.1, ValueError),
+		(False, TypeError),
+	],
+)
+def test_invalid_context_token_min_valid_fraction_raises_clear_error(
+	value: object,
+	error_type: type[Exception],
+) -> None:
+	cfg = _valid_config()
+	cfg['model']['context_token_min_valid_fraction'] = value
+
+	with pytest.raises(
+		error_type,
+		match='model\\.context_token_min_valid_fraction',
+	):
+		validate_config(cfg)
+
+
 def _valid_config() -> dict:
 	return deepcopy(load_config(Path('proc/configs/mvp_mae.yaml')))

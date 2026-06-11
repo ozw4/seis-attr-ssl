@@ -65,6 +65,9 @@ def validate_config(config: _T) -> _T:
 	if 'train' in config:
 		_validate_train(_required_mapping(config, 'train'))
 
+	if 'model' in config:
+		_validate_model(_required_mapping(config, 'model'))
+
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
 
@@ -190,6 +193,15 @@ def _validate_train(train: Mapping[str, object]) -> None:
 		_validate_bool(train, 'shuffle', prefix='train')
 
 
+def _validate_model(model: Mapping[str, object]) -> None:
+	if 'context_token_min_valid_fraction' in model:
+		_validate_unit_fraction(
+			model,
+			'context_token_min_valid_fraction',
+			prefix='model',
+		)
+
+
 def _validate_probability(parent: Mapping[str, object], key: str) -> float:
 	value = parent.get(key)
 	if isinstance(value, bool) or not isinstance(value, Real):
@@ -200,6 +212,23 @@ def _validate_probability(parent: Mapping[str, object], key: str) -> float:
 		msg = f'masking.{key} must be in [0, 1); got {probability!r}'
 		raise ValueError(msg)
 	return probability
+
+
+def _validate_unit_fraction(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> float:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{prefix}.{key} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	fraction = float(value)
+	if not 0.0 < fraction <= 1.0:
+		msg = f'{prefix}.{key} must be in (0, 1]; got {fraction!r}'
+		raise ValueError(msg)
+	return fraction
 
 
 def _validate_positive_int(

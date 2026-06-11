@@ -224,6 +224,11 @@ def _build_model(
 		decoder_depth=_int_config(model_config, 'decoder_depth', 4),
 		decoder_heads=_int_config(model_config, 'decoder_heads', 4),
 		num_context_tokens=_int_config(model_config, 'num_context_tokens', 8),
+		context_token_min_valid_fraction=_fraction_config(
+			model_config,
+			'context_token_min_valid_fraction',
+			0.5,
+		),
 		use_context=_bool_config(data_config, 'use_context', default=True),
 	)
 
@@ -360,6 +365,14 @@ def _float_config(parent: Mapping[str, object], key: str, default: float) -> flo
 		msg = f'{key} must be a float; got {value!r}'
 		raise TypeError(msg)
 	return float(value)
+
+
+def _fraction_config(parent: Mapping[str, object], key: str, default: float) -> float:
+	value = _float_config(parent, key, default)
+	if not 0.0 < value <= 1.0:
+		msg = f'{key} must be in (0, 1]; got {value!r}'
+		raise ValueError(msg)
+	return value
 
 
 def _bool_config(

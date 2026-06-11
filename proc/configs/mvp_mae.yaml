@@ -73,6 +73,7 @@ model:
   decoder_depth: 4
   decoder_heads: 4
   num_context_tokens: 8
+  context_token_min_valid_fraction: 0.5
 
 loss:
   reconstruction: huber
