@@ -16,7 +16,7 @@ from seis_attr_ssl.data.crop_sampler import (
 	make_context_request,
 	sample_random_local_crop,
 )
-from seis_attr_ssl.data.downsample import downsample_context_mean
+from seis_attr_ssl.data.downsample import downsample_context_masked_mean
 from seis_attr_ssl.data.volume_store import NpyMemmapVolumeStore
 
 if TYPE_CHECKING:
@@ -254,14 +254,14 @@ class NopimsAttributePretrainDataset:
 				context_request.start_xyz,
 				context_request.size_xyz,
 			)
-			context_volumes.append(
-				downsample_context_mean(crop, self.context_downsample),
+			context_volume, attribute_valid_mask = downsample_context_masked_mean(
+				crop,
+				valid_mask,
+				self.context_downsample,
 			)
+			context_volumes.append(context_volume)
 			if context_valid_mask is None:
-				context_valid_mask = downsample_context_mean(
-					valid_mask.astype(np.float32),
-					self.context_downsample,
-				) > 0
+				context_valid_mask = attribute_valid_mask
 
 		return (
 			np.stack(context_volumes, axis=0).astype(np.float32, copy=False),

@@ -19,13 +19,15 @@ def _write_manifest(
 	root: Path,
 	attribute_names: tuple[str, ...],
 	shape_xyz: tuple[int, int, int] = (10, 10, 10),
+	fill_value: float | None = None,
 ) -> SurveyManifest:
 	records: dict[str, AttributeVolumeRecord] = {}
 	for name in attribute_names:
 		id_ = MVP_ATTRIBUTE_REGISTRY.name_to_id(name)
 		path = root / 'attributes' / f'{name}.npy'
 		path.parent.mkdir(parents=True, exist_ok=True)
-		array = np.full(shape_xyz, float(id_), dtype=np.float32)
+		value = float(id_) if fill_value is None else fill_value
+		array = np.full(shape_xyz, value, dtype=np.float32)
 		np.save(path, array)
 		records[name] = AttributeVolumeRecord(
 			survey_id='survey-a',
@@ -155,3 +157,34 @@ def test_pretrain_dataset_requires_amplitude_norm(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='amplitude_norm'):
 		_dataset(manifest)
+
+
+def test_pretrain_dataset_context_downsample_ignores_boundary_padding(
+	tmp_path: Path,
+) -> None:
+	names = MVP_ATTRIBUTE_REGISTRY.names[:2]
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		names,
+		shape_xyz=(2, 2, 2),
+		fill_value=7.0,
+	)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(2, 2, 2),
+		context_crop_size_xyz=(4, 4, 4),
+		context_downsample=2,
+		min_input_attributes=2,
+		max_input_attributes=2,
+	)
+
+	sample = dataset[0]
+
+	np.testing.assert_array_equal(
+		sample['context'],
+		np.full((2, 2, 2, 2), 7.0, dtype=np.float32),
+	)
+	np.testing.assert_array_equal(
+		sample['context_valid_mask'],
+		np.ones((2, 2, 2), dtype=bool),
+	)
