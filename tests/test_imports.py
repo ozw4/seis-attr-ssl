@@ -14,6 +14,9 @@ MODULES = (
 	'seis_attr_ssl.losses',
 	'seis_attr_ssl.masking',
 	'seis_attr_ssl.models',
+	'seis_attr_ssl.models.common',
+	'seis_attr_ssl.models.mae',
+	'seis_attr_ssl.models.tokenizers',
 	'seis_attr_ssl.training',
 	'seis_attr_ssl.utils',
 )
