@@ -2,6 +2,10 @@ project:
   name: SeisAttrSSL
   package: seis_attr_ssl
 
+# Optional developer utility. MVP pretraining uses on-the-fly attribute
+# generation from source seismic manifests; precomputed attribute volumes are
+# not required by the default review path.
+
 paths:
   nopims_root: /home/dcuser/data/NOPIMS/
   output_root: runs

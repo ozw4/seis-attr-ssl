@@ -9,6 +9,7 @@ DEFAULT_NOPIMS_ROOT: Final = '/home/dcuser/data/NOPIMS/'
 EXPECTED_GRID_ORDER: Final = ['x', 'y', 'z']
 EXPECTED_VOLUME_FORMAT: Final = 'npy_memmap'
 EXPECTED_BASE_SEISMIC_KIND: Final = 'dip_steered_median_filtered'
+EXPECTED_ATTRIBUTE_MODE: Final = 'on_the_fly'
 EXPECTED_LOCAL_CROP_SIZE: Final = [128, 128, 128]
 EXPECTED_CONTEXT_CROP_SIZE: Final = [512, 512, 512]
 EXPECTED_CONTEXT_DOWNSAMPLE: Final = 4
