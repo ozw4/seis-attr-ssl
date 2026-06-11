@@ -6,6 +6,9 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS/
   output_root: runs
 
+manifests:
+  train: /home/dcuser/data/NOPIMS/manifests/nopims_manifests.json
+
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
@@ -231,3 +232,11 @@ def _reject_f3_pretraining_config(value: object, path: str = 'config') -> None:
 	elif isinstance(value, list):
 		for index, child in enumerate(value):
 			_reject_f3_pretraining_config(child, f'{path}[{index}]')
+	elif isinstance(value, str) and _looks_like_f3_path(value):
+		msg = f'F3 paths are not allowed in pretraining config: {path}'
+		raise ValueError(msg)
+
+
+def _looks_like_f3_path(value: str) -> bool:
+	parts = [part for part in re.split(r'[\\/]+', value.lower()) if part]
+	return any(part == 'f3' or part.startswith('f3_') for part in parts)
