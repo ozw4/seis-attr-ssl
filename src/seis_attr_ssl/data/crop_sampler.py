@@ -60,6 +60,77 @@ def sample_random_local_crop(
 	)
 
 
+def expand_request_with_halo(
+	request: CropRequest,
+	halo_xyz: Sequence[int],
+) -> tuple[CropRequest, tuple[slice, slice, slice]]:
+	"""Return a compute request expanded by halo and slices to recover payload."""
+	halo = _validate_nonnegative_xyz(halo_xyz, 'halo_xyz')
+	size = _validate_positive_xyz(request.size_xyz, 'request.size_xyz')
+	start = _validate_xyz(request.start_xyz, 'request.start_xyz')
+	compute_start = tuple(
+		start_axis - halo_axis
+		for start_axis, halo_axis in zip(start, halo, strict=True)
+	)
+	compute_size = tuple(
+		size_axis + 2 * halo_axis
+		for size_axis, halo_axis in zip(size, halo, strict=True)
+	)
+	payload_slices = tuple(
+		slice(halo_axis, halo_axis + size_axis)
+		for halo_axis, size_axis in zip(halo, size, strict=True)
+	)
+	return (
+		CropRequest(
+			survey_id=request.survey_id,
+			start_xyz=compute_start,
+			size_xyz=compute_size,
+			context_size_xyz=request.context_size_xyz,
+			context_downsample=request.context_downsample,
+		),
+		cast('tuple[slice, slice, slice]', payload_slices),
+	)
+
+
+def sample_random_local_crop_with_margin(
+	shape_xyz: Sequence[int],
+	local_size_xyz: Sequence[int],
+	margin_xyz: Sequence[int],
+	rng: np.random.Generator,
+) -> CropRequest:
+	"""Sample local payload crop so payload+margin is inside the volume."""
+	shape = _validate_positive_xyz(shape_xyz, 'shape_xyz')
+	local_size = _validate_positive_xyz(local_size_xyz, 'local_size_xyz')
+	margin = _validate_nonnegative_xyz(margin_xyz, 'margin_xyz')
+	if any(
+		shape_axis < size_axis + 2 * margin_axis
+		for shape_axis, size_axis, margin_axis in zip(
+			shape,
+			local_size,
+			margin,
+			strict=True,
+		)
+	):
+		return sample_random_local_crop(shape, local_size, rng)
+
+	start = tuple(
+		int(rng.integers(margin_axis, shape_axis - size_axis - margin_axis + 1))
+		for shape_axis, size_axis, margin_axis in zip(
+			shape,
+			local_size,
+			margin,
+			strict=True,
+		)
+	)
+	return CropRequest(
+		survey_id='',
+		start_xyz=start,
+		size_xyz=local_size,
+		context_size_xyz=None,
+		context_downsample=1,
+	)
+
+
 def make_context_request(
 	local_request: CropRequest,
 	context_size_xyz: Sequence[int],
@@ -119,7 +190,10 @@ def _validate_xyz(value: Sequence[int], name: str) -> XYZ:
 	if (
 		isinstance(value, str)
 		or len(value) != 3
-		or not all(isinstance(axis, Integral) for axis in value)
+		or not all(
+			not isinstance(axis, bool) and isinstance(axis, Integral)
+			for axis in value
+		)
 	):
 		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
 		raise TypeError(msg)
@@ -144,7 +218,9 @@ def _validate_nonnegative_xyz(value: Sequence[int], name: str) -> XYZ:
 
 __all__ = [
 	'compute_centered_start',
+	'expand_request_with_halo',
 	'make_context_request',
 	'sample_random_center',
 	'sample_random_local_crop',
+	'sample_random_local_crop_with_margin',
 ]

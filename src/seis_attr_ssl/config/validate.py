@@ -14,10 +14,13 @@ from seis_attr_ssl.config.schema import (
 	EXPECTED_ATTRIBUTE_MODE,
 	EXPECTED_ATTRIBUTES,
 	EXPECTED_BASE_SEISMIC_KIND,
+	EXPECTED_CONTEXT_ATTRIBUTE_HALO,
 	EXPECTED_CONTEXT_CROP_SIZE,
 	EXPECTED_CONTEXT_DOWNSAMPLE,
 	EXPECTED_GRID_ORDER,
+	EXPECTED_LOCAL_ATTRIBUTE_HALO,
 	EXPECTED_LOCAL_CROP_SIZE,
+	EXPECTED_REQUIRE_FULL_HALO_INSIDE_VOLUME,
 	EXPECTED_VOLUME_FORMAT,
 	F3_ALLOWED_STAGES,
 	KNOWN_STAGES,
@@ -49,6 +52,8 @@ def validate_config(config: _T) -> _T:
 	_validate_equal(data, 'context_crop_size', EXPECTED_CONTEXT_CROP_SIZE)
 	_validate_equal(data, 'context_downsample', EXPECTED_CONTEXT_DOWNSAMPLE)
 	_validate_context_downsample(data)
+	if stage == 'pretrain_mae':
+		_validate_attribute_halo_config(data)
 
 	attributes = _required_mapping(config, 'attributes')
 	_validate_attributes(attributes)
@@ -133,6 +138,63 @@ def _validate_context_downsample(data: Mapping[str, object]) -> None:
 			f'must equal data.local_crop_size; got {downsampled!r} '
 			f'and {local_crop_size!r}'
 		)
+		raise ValueError(msg)
+
+
+def _validate_attribute_halo_config(data: Mapping[str, object]) -> None:
+	local_halo = _validate_xyz_nonnegative_ints(
+		data,
+		'local_attribute_halo',
+		prefix='data',
+	)
+	context_halo = _validate_xyz_nonnegative_ints(
+		data,
+		'context_attribute_halo',
+		prefix='data',
+	)
+	_validate_equal(
+		data,
+		'local_attribute_halo',
+		EXPECTED_LOCAL_ATTRIBUTE_HALO,
+	)
+	_validate_equal(
+		data,
+		'context_attribute_halo',
+		EXPECTED_CONTEXT_ATTRIBUTE_HALO,
+	)
+	_validate_bool(data, 'require_full_halo_inside_volume', prefix='data')
+	_validate_equal(
+		data,
+		'require_full_halo_inside_volume',
+		EXPECTED_REQUIRE_FULL_HALO_INSIDE_VOLUME,
+	)
+
+	local_crop_size = _require_xyz_list(data, 'local_crop_size', prefix='data')
+	context_crop_size = _require_xyz_list(data, 'context_crop_size', prefix='data')
+	context_downsample = _validate_positive_int(
+		data,
+		'context_downsample',
+		prefix='data',
+	)
+	downsampled_context_size = [
+		size // context_downsample
+		for size in context_crop_size
+	]
+	_validate_compute_crop_size(local_crop_size, local_halo, 'local')
+	_validate_compute_crop_size(downsampled_context_size, context_halo, 'context')
+
+
+def _validate_compute_crop_size(
+	crop_size: list[int],
+	halo_xyz: tuple[int, int, int],
+	name: str,
+) -> None:
+	compute_size = [
+		size + 2 * halo
+		for size, halo in zip(crop_size, halo_xyz, strict=True)
+	]
+	if any(size <= 0 for size in compute_size):
+		msg = f'data.{name} attribute compute crop size must be positive'
 		raise ValueError(msg)
 
 
@@ -299,6 +361,31 @@ def _validate_bool(
 
 
 def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:
+	value = _require_xyz_list(parent, key, prefix='masking')
+	if any(int(item) <= 0 for item in value):
+		msg = f'masking.{key} values must be positive; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_xyz_nonnegative_ints(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> tuple[int, int, int]:
+	value = _require_xyz_list(parent, key, prefix=prefix)
+	if any(item < 0 for item in value):
+		msg = f'{prefix}.{key} values must be nonnegative; got {value!r}'
+		raise ValueError(msg)
+	return tuple(value)
+
+
+def _require_xyz_list(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> list[int]:
 	value = parent.get(key)
 	if (
 		isinstance(value, str)
@@ -309,11 +396,9 @@ def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:
 			for item in value
 		)
 	):
-		msg = f'masking.{key} must be a length-3 integer list; got {value!r}'
+		msg = f'{prefix}.{key} must be a length-3 integer list; got {value!r}'
 		raise TypeError(msg)
-	if any(int(item) <= 0 for item in value):
-		msg = f'masking.{key} values must be positive; got {value!r}'
-		raise ValueError(msg)
+	return [int(item) for item in value]
 
 
 def _reject_f3_pretraining_config(value: object, path: str = 'config') -> None:

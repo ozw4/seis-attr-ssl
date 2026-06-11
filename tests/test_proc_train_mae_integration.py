@@ -143,6 +143,9 @@ def _synthetic_config(tmp_path: Path, manifest_path: Path) -> dict[str, object]:
 			'local_crop_size': [128, 128, 128],
 			'context_crop_size': [512, 512, 512],
 			'context_downsample': 4,
+			'local_attribute_halo': [16, 16, 64],
+			'context_attribute_halo': [8, 8, 16],
+			'require_full_halo_inside_volume': True,
 			'use_context': False,
 		},
 		'attributes': {

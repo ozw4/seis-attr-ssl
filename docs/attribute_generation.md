@@ -6,6 +6,15 @@ dip-steered median filtered `.npy` memmap recorded in the base-seismic manifest.
 
 The local crop is `[128, 128, 128]`. The context crop is `[512, 512, 512]`,
 downsampled by 4 to `[128, 128, 128]` before context attributes are generated.
+Attribute generation uses a local halo of `[16, 16, 64]` around the payload
+crop. Context attribute generation uses a halo of `[8, 8, 16]` on the
+downsampled context grid; in source-space coordinates that halo is multiplied
+by `context_downsample`.
+
+Training samples require full halo coverage inside the volume whenever
+possible. Small synthetic test volumes may fall back to ordinary payload crop
+sampling when the full margin cannot fit; NOPIMS production pretraining assumes
+the full local and context halo fit inside each sampled volume.
 
 Generated attributes follow the stable `seis_attr_ssl` registry order:
 

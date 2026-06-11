@@ -45,9 +45,17 @@ Production pretraining defaults are:
 local_crop_size: [128, 128, 128]
 context_crop_size: [512, 512, 512]
 context_downsample: 4
+local_attribute_halo: [16, 16, 64]
+context_attribute_halo: [8, 8, 16]
+require_full_halo_inside_volume: true
 ```
 
-Tests may use smaller crops and volumes.
+The local halo is in source-grid `[x, y, z]` coordinates. The context halo is
+defined on the downsampled context grid, so its source-space margin is
+`context_attribute_halo * context_downsample`. Tests may use smaller crops and
+volumes, and small synthetic volumes may fall back to ordinary crop sampling
+when the full halo margin cannot fit. NOPIMS production pretraining assumes the
+full halo fits inside the sampled volume.
 
 ## MVP Attributes
 
