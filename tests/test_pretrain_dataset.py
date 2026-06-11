@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
+from seis_attr_ssl.config import load_config
 from seis_attr_ssl.data import AttributeVolumeRecord, SurveyManifest
 from seis_attr_ssl.data.attribute_subset import sample_attribute_subset
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
@@ -47,6 +48,30 @@ def _write_manifest(
 	)
 
 
+def _manifest_metadata(
+	root: Path,
+	attribute_names: tuple[str, ...],
+	shape_xyz: tuple[int, int, int],
+) -> SurveyManifest:
+	return SurveyManifest(
+		survey_id='survey-a',
+		root=root,
+		attribute_volumes={
+			name: AttributeVolumeRecord(
+				survey_id='survey-a',
+				attribute_name=name,
+				path=Path('attributes') / f'{name}.npy',
+				shape_xyz=shape_xyz,
+				dtype='float32',
+				grid_order=('x', 'y', 'z'),
+				is_memmap_safe=True,
+			)
+			for name in attribute_names
+		},
+		shape_xyz=shape_xyz,
+	)
+
+
 def _dataset(
 	manifest: SurveyManifest,
 	**kwargs: object,
@@ -55,6 +80,7 @@ def _dataset(
 		'local_crop_size_xyz': LOCAL_SIZE,
 		'context_crop_size_xyz': CONTEXT_SIZE,
 		'context_downsample': CONTEXT_DOWNSAMPLE,
+		'patch_size_xyz': LOCAL_SIZE,
 		'min_input_attributes': 2,
 		'max_input_attributes': 4,
 		'seed': 123,
@@ -91,7 +117,11 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 		'x',
 		'target',
 		'attribute_ids',
+		'spatial_mask',
+		'visible_spatial_mask',
 		'attribute_input_mask',
+		'attribute_target_mask',
+		'dropped_attribute_mask',
 		'target_attribute_ids',
 		'valid_attributes',
 		'target_valid',
@@ -104,14 +134,30 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 	target = sample['target']
 	attribute_ids = sample['attribute_ids']
 	attribute_input_mask = sample['attribute_input_mask']
+	attribute_target_mask = sample['attribute_target_mask']
+	dropped_attribute_mask = sample['dropped_attribute_mask']
+	spatial_mask = sample['spatial_mask']
+	visible_spatial_mask = sample['visible_spatial_mask']
 	assert isinstance(x, np.ndarray)
 	assert isinstance(target, np.ndarray)
 	assert isinstance(attribute_ids, np.ndarray)
 	assert isinstance(attribute_input_mask, np.ndarray)
+	assert isinstance(attribute_target_mask, np.ndarray)
+	assert isinstance(dropped_attribute_mask, np.ndarray)
+	assert isinstance(spatial_mask, np.ndarray)
+	assert isinstance(visible_spatial_mask, np.ndarray)
 	assert x.shape == (len(attribute_ids), *LOCAL_SIZE)
 	assert target.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs), *LOCAL_SIZE)
+	assert spatial_mask.shape == (1, 1, 1)
+	assert visible_spatial_mask.shape == spatial_mask.shape
 	assert attribute_input_mask.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs),)
+	assert attribute_target_mask.shape == attribute_input_mask.shape
+	assert dropped_attribute_mask.shape == attribute_input_mask.shape
+	assert spatial_mask.dtype == np.bool_
+	assert visible_spatial_mask.dtype == np.bool_
 	assert attribute_input_mask.dtype == np.bool_
+	assert attribute_target_mask.dtype == np.bool_
+	assert dropped_attribute_mask.dtype == np.bool_
 	assert sample['context'].shape == (len(attribute_ids), *LOCAL_SIZE)
 	assert sample['context_valid_mask'].shape == LOCAL_SIZE
 	assert sample['local_valid_mask'].shape == LOCAL_SIZE
@@ -126,8 +172,61 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 		np.flatnonzero(attribute_input_mask).astype(np.int64),
 	)
 	np.testing.assert_array_equal(sample['target_valid'], np.ones(10, dtype=bool))
+	np.testing.assert_array_equal(attribute_target_mask, sample['target_valid'])
+	np.testing.assert_array_equal(visible_spatial_mask, np.logical_not(spatial_mask))
+	np.testing.assert_array_equal(
+		dropped_attribute_mask,
+		np.logical_and(attribute_target_mask, np.logical_not(attribute_input_mask)),
+	)
 	for row, id_ in enumerate(attribute_ids):
 		np.testing.assert_array_equal(x[row], target[id_])
+
+
+def test_pretrain_dataset_default_mae_spatial_mask_shape_and_ratio(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(128, 128, 128),
+	)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(128, 128, 128),
+		patch_size_xyz=(8, 8, 8),
+		use_context=False,
+	)
+
+	sample = dataset[0]
+	spatial_mask = sample['spatial_mask']
+
+	assert spatial_mask.shape == (16, 16, 16)
+	assert 0.74 <= float(spatial_mask.mean()) <= 0.76
+
+
+def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> None:
+	cfg = load_config(Path('proc/configs/mvp_mae.yaml'))
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(128, 128, 128),
+	)
+
+	dataset = NopimsAttributePretrainDataset.from_config([manifest], cfg)
+
+	assert dataset.local_crop_size_xyz == (128, 128, 128)
+	assert dataset.context_crop_size_xyz == (512, 512, 512)
+	assert dataset.context_downsample == 4
+	assert dataset.use_context is True
+	assert dataset.patch_size_xyz == (8, 8, 8)
+	assert dataset.spatial_mask_ratio == 0.75
+	assert dataset.spatial_mask_mode == 'block'
+	assert dataset.block_size_tokens_xyz == (2, 2, 2)
+	assert dataset.min_input_attributes == 4
+	assert dataset.max_input_attributes == 10
+	assert dataset.attribute_dropout_prob == 0.30
+	assert dataset.group_dropout_prob == 0.20
+	assert dataset.seed == 42
 
 
 def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) -> None:
@@ -142,7 +241,11 @@ def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) ->
 		'x',
 		'target',
 		'attribute_ids',
+		'spatial_mask',
+		'visible_spatial_mask',
 		'attribute_input_mask',
+		'attribute_target_mask',
+		'dropped_attribute_mask',
 		'target_valid',
 		'local_valid_mask',
 	):
@@ -190,6 +293,7 @@ def test_pretrain_dataset_context_downsample_ignores_boundary_padding(
 		local_crop_size_xyz=(2, 2, 2),
 		context_crop_size_xyz=(4, 4, 4),
 		context_downsample=2,
+		patch_size_xyz=(2, 2, 2),
 		min_input_attributes=2,
 		max_input_attributes=2,
 	)

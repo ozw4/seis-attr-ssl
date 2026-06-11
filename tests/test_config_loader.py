@@ -203,5 +203,30 @@ def test_f3_pretraining_setting_is_rejected() -> None:
 		validate_config(cfg)
 
 
+def test_invalid_masking_ratio_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['masking']['spatial_mask_ratio'] = 1.0
+
+	with pytest.raises(ValueError, match='masking\\.spatial_mask_ratio'):
+		validate_config(cfg)
+
+
+def test_invalid_masking_mode_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['masking']['spatial_mask_mode'] = 'random'
+
+	with pytest.raises(ValueError, match='masking\\.spatial_mask_mode'):
+		validate_config(cfg)
+
+
+def test_invalid_masking_attribute_bounds_raise_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['masking']['min_input_attributes'] = 11
+	cfg['masking']['max_input_attributes'] = 10
+
+	with pytest.raises(ValueError, match='masking\\.min_input_attributes'):
+		validate_config(cfg)
+
+
 def _valid_config() -> dict:
 	return deepcopy(load_config(Path('proc/configs/mvp_mae.yaml')))

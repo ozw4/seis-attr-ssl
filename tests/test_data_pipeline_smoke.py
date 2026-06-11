@@ -22,7 +22,11 @@ EXPECTED_SAMPLE_KEYS = {
 	'x',
 	'target',
 	'attribute_ids',
+	'spatial_mask',
+	'visible_spatial_mask',
 	'attribute_input_mask',
+	'attribute_target_mask',
+	'dropped_attribute_mask',
 	'target_attribute_ids',
 	'valid_attributes',
 	'target_valid',
@@ -80,7 +84,11 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		x = sample['x']
 		target = sample['target']
 		attribute_ids = sample['attribute_ids']
+		spatial_mask = sample['spatial_mask']
+		visible_spatial_mask = sample['visible_spatial_mask']
 		attribute_input_mask = sample['attribute_input_mask']
+		attribute_target_mask = sample['attribute_target_mask']
+		dropped_attribute_mask = sample['dropped_attribute_mask']
 		target_attribute_ids = sample['target_attribute_ids']
 		valid_attributes = sample['valid_attributes']
 		context = sample['context']
@@ -90,7 +98,11 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		assert isinstance(x, np.ndarray)
 		assert isinstance(target, np.ndarray)
 		assert isinstance(attribute_ids, np.ndarray)
+		assert isinstance(spatial_mask, np.ndarray)
+		assert isinstance(visible_spatial_mask, np.ndarray)
 		assert isinstance(attribute_input_mask, np.ndarray)
+		assert isinstance(attribute_target_mask, np.ndarray)
+		assert isinstance(dropped_attribute_mask, np.ndarray)
 		assert isinstance(target_attribute_ids, np.ndarray)
 		assert isinstance(valid_attributes, np.ndarray)
 		assert isinstance(context, np.ndarray)
@@ -100,7 +112,11 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		assert x.dtype == np.float32
 		assert target.dtype == np.float32
 		assert attribute_ids.dtype == np.int64
+		assert spatial_mask.dtype == np.bool_
+		assert visible_spatial_mask.dtype == np.bool_
 		assert attribute_input_mask.dtype == np.bool_
+		assert attribute_target_mask.dtype == np.bool_
+		assert dropped_attribute_mask.dtype == np.bool_
 		assert target_attribute_ids.dtype == np.int64
 		assert valid_attributes.dtype == np.bool_
 		target_valid = sample['target_valid']
@@ -108,7 +124,11 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		assert target_valid.dtype == np.bool_
 
 		assert 4 <= len(attribute_ids) <= 6
+		assert spatial_mask.shape == (1, 1, 1)
+		assert visible_spatial_mask.shape == spatial_mask.shape
 		assert attribute_input_mask.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs),)
+		assert attribute_target_mask.shape == attribute_input_mask.shape
+		assert dropped_attribute_mask.shape == attribute_input_mask.shape
 		assert x.shape == (len(attribute_ids), *LOCAL_SIZE_XYZ)
 		assert target.shape == (
 			len(MVP_ATTRIBUTE_REGISTRY.specs),
@@ -127,8 +147,17 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 			np.flatnonzero(attribute_input_mask).astype(np.int64),
 		)
 		np.testing.assert_array_equal(
+			visible_spatial_mask,
+			np.logical_not(spatial_mask),
+		)
+		np.testing.assert_array_equal(
 			sample['target_valid'],
 			np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+		)
+		np.testing.assert_array_equal(attribute_target_mask, sample['target_valid'])
+		np.testing.assert_array_equal(
+			dropped_attribute_mask,
+			np.logical_and(attribute_target_mask, np.logical_not(attribute_input_mask)),
 		)
 		np.testing.assert_array_equal(
 			valid_attributes,

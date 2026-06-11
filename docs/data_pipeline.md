@@ -97,6 +97,11 @@ to reload the manifest list for datasets.
 x
 target
 attribute_ids
+spatial_mask
+visible_spatial_mask
+attribute_input_mask
+attribute_target_mask
+dropped_attribute_mask
 target_attribute_ids
 valid_attributes
 target_valid
@@ -112,6 +117,11 @@ For one sample:
 x: selected input attributes, [C, X, Y, Z], float32
 target: all MVP target attributes, [A, X, Y, Z], float32
 attribute_ids: selected stable attribute IDs, int64
+spatial_mask: MAE token mask, [TX, TY, TZ], bool, True means masked
+visible_spatial_mask: visible MAE token mask, [TX, TY, TZ], bool
+attribute_input_mask: selected input attributes over all A attributes, bool
+attribute_target_mask: valid reconstruction targets over all A attributes, bool
+dropped_attribute_mask: valid targets withheld from input, bool
 target_attribute_ids: all stable MVP attribute IDs, int64
 valid_attributes: validity flags for x channels, bool
 target_valid: validity flags for target channels, bool

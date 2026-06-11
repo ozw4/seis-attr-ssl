@@ -37,6 +37,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 	paths = _mapping(cfg.get('paths'))
 	data = _mapping(cfg.get('data'))
 	attributes = _mapping(cfg.get('attributes'))
+	masking = _mapping(cfg.get('masking'))
 	model = _mapping(cfg.get('model'))
 	train = _mapping(cfg.get('train'))
 
@@ -54,6 +55,19 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 
 	if 'name' in model:
 		rows.append(('model.name', model.get('name')))
+	rows.extend(
+		(f'masking.{key}', masking.get(key))
+		for key in (
+			'spatial_mask_ratio',
+			'spatial_mask_mode',
+			'block_size_tokens',
+			'min_input_attributes',
+			'max_input_attributes',
+			'attribute_dropout_prob',
+			'group_dropout_prob',
+		)
+		if key in masking
+	)
 	if 'batch_size' in train:
 		rows.append(('train.batch_size', train.get('batch_size')))
 	if 'epochs' in train:

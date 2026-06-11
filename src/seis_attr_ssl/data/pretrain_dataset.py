@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from numbers import Integral
+from collections.abc import Mapping
+from numbers import Integral, Real
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -17,7 +18,7 @@ from seis_attr_ssl.data.crop_sampler import (
 )
 from seis_attr_ssl.data.downsample import downsample_context_masked_mean
 from seis_attr_ssl.data.volume_store import NpyMemmapVolumeStore
-from seis_attr_ssl.masking import sample_attribute_input_mask
+from seis_attr_ssl.masking import build_mae_masking_plan
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
@@ -39,6 +40,10 @@ class NopimsAttributePretrainDataset:
 		context_crop_size_xyz: Sequence[int] = (512, 512, 512),
 		context_downsample: int = 4,
 		use_context: bool = True,  # noqa: FBT001, FBT002
+		patch_size_xyz: Sequence[int] = (8, 8, 8),
+		spatial_mask_ratio: float = 0.75,
+		spatial_mask_mode: str = 'block',
+		block_size_tokens_xyz: Sequence[int] = (2, 2, 2),
 		min_input_attributes: int = 4,
 		max_input_attributes: int = 10,
 		attribute_dropout_prob: float = 0.0,
@@ -65,6 +70,16 @@ class NopimsAttributePretrainDataset:
 			'context_downsample',
 		)
 		self.use_context = bool(use_context)
+		self.patch_size_xyz = _validate_xyz(patch_size_xyz, 'patch_size_xyz')
+		self.spatial_mask_ratio = _validate_probability(
+			spatial_mask_ratio,
+			'spatial_mask_ratio',
+		)
+		self.spatial_mask_mode = _validate_spatial_mask_mode(spatial_mask_mode)
+		self.block_size_tokens_xyz = _validate_xyz(
+			block_size_tokens_xyz,
+			'block_size_tokens_xyz',
+		)
 		self.min_input_attributes = _validate_positive_int(
 			min_input_attributes,
 			'min_input_attributes',
@@ -105,6 +120,40 @@ class NopimsAttributePretrainDataset:
 		)
 		self._validate_manifests()
 
+	@classmethod
+	def from_config(
+		cls,
+		manifests: Sequence[SurveyManifest],
+		config: Mapping[str, object],
+		registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
+		*,
+		samples_per_epoch: int | None = None,
+	) -> NopimsAttributePretrainDataset:
+		"""Build a pretrain dataset from validated MVP config sections."""
+		data = _require_config_mapping(config, 'data')
+		model = _require_config_mapping(config, 'model')
+		masking = _require_config_mapping(config, 'masking')
+		train = _require_config_mapping(config, 'train')
+
+		return cls(
+			manifests,
+			registry=registry,
+			local_crop_size_xyz=data['local_crop_size'],
+			context_crop_size_xyz=data['context_crop_size'],
+			context_downsample=data['context_downsample'],
+			use_context=data['use_context'],
+			patch_size_xyz=model['patch_size'],
+			spatial_mask_ratio=masking['spatial_mask_ratio'],
+			spatial_mask_mode=masking['spatial_mask_mode'],
+			block_size_tokens_xyz=masking['block_size_tokens'],
+			min_input_attributes=masking['min_input_attributes'],
+			max_input_attributes=masking['max_input_attributes'],
+			attribute_dropout_prob=masking['attribute_dropout_prob'],
+			group_dropout_prob=masking['group_dropout_prob'],
+			seed=train['seed'],
+			samples_per_epoch=samples_per_epoch,
+		)
+
 	def __len__(self) -> int:
 		"""Return configured epoch length."""
 		return self.samples_per_epoch
@@ -129,24 +178,25 @@ class NopimsAttributePretrainDataset:
 			rng,
 		)
 		available_ids = self._available_attribute_ids(manifest)
-		attribute_input_mask = sample_attribute_input_mask(
-			available_ids,
-			self._target_attribute_ids,
-			self.registry.groups,
-			self.min_input_attributes,
-			self.max_input_attributes,
-			self.attribute_dropout_prob,
-			self.group_dropout_prob,
-			rng,
-		)
-		input_ids = tuple(
-			int(id_) for id_ in self._target_attribute_ids[attribute_input_mask]
-		)
-
 		target, target_valid, local_valid_mask = self._read_target(
 			manifest,
 			local_request,
 		)
+		masking_plan = build_mae_masking_plan(
+			available_attribute_ids=available_ids,
+			target_valid=target_valid,
+			local_crop_size_xyz=self.local_crop_size_xyz,
+			patch_size_xyz=self.patch_size_xyz,
+			spatial_mask_ratio=self.spatial_mask_ratio,
+			block_size_tokens_xyz=self.block_size_tokens_xyz,
+			min_input_attributes=self.min_input_attributes,
+			max_input_attributes=self.max_input_attributes,
+			attribute_dropout_prob=self.attribute_dropout_prob,
+			group_dropout_prob=self.group_dropout_prob,
+			attribute_groups=self.registry.groups,
+			rng=rng,
+		)
+		input_ids = tuple(int(id_) for id_ in masking_plan.input_attribute_ids)
 		x = np.stack(
 			[target[id_] for id_ in input_ids],
 			axis=0,
@@ -162,8 +212,12 @@ class NopimsAttributePretrainDataset:
 			'x': x,
 			'target': target,
 			'attribute_ids': np.asarray(input_ids, dtype=np.int64),
-			'attribute_input_mask': attribute_input_mask,
-			'target_attribute_ids': self._target_attribute_ids.copy(),
+			'spatial_mask': masking_plan.spatial_mask,
+			'visible_spatial_mask': masking_plan.visible_spatial_mask,
+			'attribute_input_mask': masking_plan.attribute_input_mask,
+			'attribute_target_mask': masking_plan.attribute_target_mask,
+			'dropped_attribute_mask': masking_plan.dropped_attribute_mask,
+			'target_attribute_ids': masking_plan.target_attribute_ids,
 			'valid_attributes': np.ones(len(input_ids), dtype=bool),
 			'target_valid': target_valid,
 			'coords': {
@@ -287,6 +341,17 @@ def _resolve_record_path(manifest: SurveyManifest, path: Path) -> Path:
 	return manifest.root / path
 
 
+def _require_config_mapping(
+	config: Mapping[str, object],
+	key: str,
+) -> Mapping[str, object]:
+	value = config[key]
+	if not isinstance(value, Mapping):
+		msg = f'config.{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
 def _validate_xyz(value: Sequence[int], name: str) -> XYZ:
 	if (
 		isinstance(value, str)
@@ -303,7 +368,7 @@ def _validate_xyz(value: Sequence[int], name: str) -> XYZ:
 
 
 def _validate_positive_int(value: int, name: str) -> int:
-	if not isinstance(value, Integral):
+	if isinstance(value, bool) or not isinstance(value, Integral):
 		msg = f'{name} must be an integer; got {value!r}'
 		raise TypeError(msg)
 	count = int(value)
@@ -314,7 +379,7 @@ def _validate_positive_int(value: int, name: str) -> int:
 
 
 def _validate_nonnegative_int(value: int, name: str) -> int:
-	if not isinstance(value, Integral):
+	if isinstance(value, bool) or not isinstance(value, Integral):
 		msg = f'{name} must be an integer; got {value!r}'
 		raise TypeError(msg)
 	count = int(value)
@@ -322,6 +387,24 @@ def _validate_nonnegative_int(value: int, name: str) -> int:
 		msg = f'{name} must be nonnegative; got {count!r}'
 		raise ValueError(msg)
 	return count
+
+
+def _validate_probability(value: float, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	probability = float(value)
+	if not 0.0 <= probability < 1.0:
+		msg = f'{name} must be in [0, 1); got {probability!r}'
+		raise ValueError(msg)
+	return probability
+
+
+def _validate_spatial_mask_mode(value: str) -> str:
+	if value != 'block':
+		msg = f"spatial_mask_mode must be 'block'; got {value!r}"
+		raise ValueError(msg)
+	return value
 
 
 def _validate_context_geometry(
