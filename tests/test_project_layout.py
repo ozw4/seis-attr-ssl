@@ -10,6 +10,7 @@ REQUIRED_PATHS = (
 	Path('proc/configs/'),
 	Path('docs/'),
 	Path('docs/mvp_spec.md'),
+	Path('docs/mae_pretraining.md'),
 	Path('pyproject.toml'),
 	Path('README.md'),
 )

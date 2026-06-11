@@ -61,3 +61,32 @@ def test_train_mae_dry_run_prints_masking_settings() -> None:
 	assert 'masking.spatial_mask_ratio: 0.75' in result.stdout
 	assert 'masking.spatial_mask_mode: block' in result.stdout
 	assert 'masking.block_size_tokens: 2, 2, 2' in result.stdout
+
+
+@pytest.mark.parametrize(
+	('args', 'expected_stderr'),
+	[
+		(('--max-steps', '-1'), 'train.max_steps must be positive'),
+		(('--output-root', 'F3/run'), 'F3 paths are not allowed'),
+	],
+)
+def test_train_mae_dry_run_validates_cli_overrides(
+	args: tuple[str, ...],
+	expected_stderr: str,
+) -> None:
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			str(PROJECT_ROOT / 'proc/train_mae.py'),
+			'--dry-run',
+			*args,
+		],
+		check=False,
+		capture_output=True,
+		text=True,
+		cwd=PROJECT_ROOT,
+	)
+
+	assert result.returncode != 0
+	assert expected_stderr in result.stderr
+	assert 'stage:' not in result.stdout

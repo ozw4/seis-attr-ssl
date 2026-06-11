@@ -1,25 +1,94 @@
-"""Dry-run entrypoint for MAE pretraining."""
+"""Entrypoint for MAE pretraining."""
 
 from __future__ import annotations
 
 import sys
+from argparse import ArgumentParser
 from pathlib import Path
 
 SRC_ROOT = Path(__file__).resolve().parents[1] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_attr_ssl.utils.cli import run_config_entrypoint  # noqa: E402
+from seis_attr_ssl.config import load_config, validate_config  # noqa: E402
+from seis_attr_ssl.training.mae import run_mae_pretraining  # noqa: E402
+from seis_attr_ssl.utils.cli import print_config_summary  # noqa: E402
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent / 'configs' / 'mvp_mae.yaml'
 
 
 def main() -> None:
-	"""Validate the MAE config or report that training is pending."""
-	run_config_entrypoint(
-		'Pretrain the strict-attribute-set MAE model.',
-		DEFAULT_CONFIG,
+	"""Run MAE pretraining or print a dry-run config summary."""
+	parser = ArgumentParser(description='Pretrain the strict-attribute-set MAE model.')
+	parser.add_argument(
+		'--config',
+		type=Path,
+		default=DEFAULT_CONFIG,
+		help='Path to a YAML configuration file.',
 	)
+	parser.add_argument(
+		'--dry-run',
+		action='store_true',
+		help='Validate the config and print a run summary without executing.',
+	)
+	parser.add_argument(
+		'--device',
+		choices=('auto', 'cpu', 'cuda'),
+		help='Training device override.',
+	)
+	parser.add_argument(
+		'--max-steps',
+		type=int,
+		help='Stop after N optimizer steps for smoke runs.',
+	)
+	parser.add_argument(
+		'--output-root',
+		type=Path,
+		help='Override paths.output_root for checkpoints.',
+	)
+	args = parser.parse_args()
+
+	config = load_config(args.config)
+	_apply_cli_overrides(
+		config,
+		device=args.device,
+		max_steps=args.max_steps,
+		output_root=args.output_root,
+	)
+	config = validate_config(config)
+	if args.dry_run:
+		print_config_summary(config)
+		return
+
+	checkpoint_path = run_mae_pretraining(config)
+	print(f'checkpoint: {checkpoint_path}')
+
+
+def _apply_cli_overrides(
+	config: dict[str, object],
+	*,
+	device: str | None,
+	max_steps: int | None,
+	output_root: Path | None,
+) -> None:
+	if device is not None or max_steps is not None:
+		train = _section(config, 'train')
+	if output_root is not None:
+		paths = _section(config, 'paths')
+	if device is not None:
+		train['device'] = device
+	if max_steps is not None:
+		train['max_steps'] = max_steps
+	if output_root is not None:
+		paths['output_root'] = str(output_root)
+
+
+def _section(config: dict[str, object], key: str) -> dict[str, object]:
+	value = config[key]
+	if not isinstance(value, dict):
+		msg = f'{key} must be a mapping'
+		raise TypeError(msg)
+	return value
 
 
 if __name__ == '__main__':
