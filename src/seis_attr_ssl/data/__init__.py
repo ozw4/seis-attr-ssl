@@ -21,14 +21,18 @@ if TYPE_CHECKING:
 	from seis_attr_ssl.data.manifest_builder import (
 		ManifestBuildResult,
 		ManifestBuildSummary,
+		build_nopims_base_seismic_manifests,
 		build_nopims_manifests,
+		scan_nopims_base_seismic_manifests,
 		scan_nopims_manifests,
 		summarize_manifests,
 	)
 	from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 	from seis_attr_ssl.data.schema import (
+		BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
 		GRID_ORDER_XYZ,
 		AttributeVolumeRecord,
+		BaseSeismicVolumeRecord,
 		CropRequest,
 		SurveyManifest,
 		TensorLike,
@@ -46,9 +50,11 @@ if TYPE_CHECKING:
 
 __all__ = [
 	'AMPLITUDE_ATTRIBUTE_ID',
+	'BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED',
 	'GRID_ORDER_XYZ',
 	'MVP_ATTRIBUTE_IDS',
 	'AttributeVolumeRecord',
+	'BaseSeismicVolumeRecord',
 	'CropRequest',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
@@ -58,6 +64,7 @@ __all__ = [
 	'SurveyManifest',
 	'TensorLike',
 	'UnlabeledPretrainingSample',
+	'build_nopims_base_seismic_manifests',
 	'build_nopims_manifests',
 	'compute_centered_start',
 	'downsample_context_mean',
@@ -67,6 +74,7 @@ __all__ = [
 	'sample_attribute_subset',
 	'sample_random_center',
 	'sample_random_local_crop',
+	'scan_nopims_base_seismic_manifests',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 	'survey_manifest_from_dict',
@@ -77,7 +85,9 @@ __all__ = [
 _MANIFEST_BUILDER_EXPORTS = {
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
+	'build_nopims_base_seismic_manifests',
 	'build_nopims_manifests',
+	'scan_nopims_base_seismic_manifests',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 }
@@ -106,6 +116,8 @@ _PRETRAIN_DATASET_EXPORTS = {
 _SCHEMA_EXPORTS = {
 	'GRID_ORDER_XYZ',
 	'AttributeVolumeRecord',
+	'BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED',
+	'BaseSeismicVolumeRecord',
 	'CropRequest',
 	'SurveyManifest',
 	'TensorLike',

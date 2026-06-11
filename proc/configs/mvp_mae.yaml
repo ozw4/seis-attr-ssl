@@ -7,7 +7,7 @@ paths:
   output_root: runs
 
 manifests:
-  train: /home/dcuser/data/NOPIMS/manifests/nopims_manifests.json
+  train: /home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json
 
 data:
   grid_order: [x, y, z]

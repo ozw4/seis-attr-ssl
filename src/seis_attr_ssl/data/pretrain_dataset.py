@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
+from seis_attr_ssl.attributes.on_the_fly import (
+	NormalizationStats,
+	generate_mvp_attribute,
+	load_normalization_stats,
+)
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
 )
@@ -119,6 +124,7 @@ class NopimsAttributePretrainDataset:
 			[spec.id for spec in self.registry.specs],
 			dtype=np.int64,
 		)
+		self._normalization_stats: dict[Path, NormalizationStats] = {}
 		self._validate_manifests()
 
 	@classmethod
@@ -249,7 +255,18 @@ class NopimsAttributePretrainDataset:
 		amplitude_name = self.registry.id_to_name(AMPLITUDE_ATTRIBUTE_ID)
 		for manifest in self.manifests:
 			manifest.validate_consistent_shapes()
-			if amplitude_name not in manifest.attribute_volumes:
+			if manifest.base_seismic is not None:
+				stats_path = _resolve_manifest_path(
+					manifest,
+					manifest.base_seismic.normalization_stats_path,
+				)
+				if not stats_path.is_file():
+					msg = (
+						f'survey {manifest.survey_id!r} normalization stats file '
+						f'does not exist: {stats_path}'
+					)
+					raise FileNotFoundError(msg)
+			elif amplitude_name not in manifest.attribute_volumes:
 				msg = (
 					f'survey {manifest.survey_id!r} is missing required '
 					f'attribute {amplitude_name!r}'
@@ -265,6 +282,8 @@ class NopimsAttributePretrainDataset:
 				raise ValueError(msg)
 
 	def _available_attribute_ids(self, manifest: SurveyManifest) -> tuple[int, ...]:
+		if manifest.base_seismic is not None:
+			return tuple(spec.id for spec in self.registry.specs)
 		return tuple(
 			spec.id
 			for spec in self.registry.specs
@@ -283,12 +302,28 @@ class NopimsAttributePretrainDataset:
 		target_valid = np.zeros(len(self.registry.specs), dtype=bool)
 		local_valid_mask: np.ndarray | None = None
 
+		if manifest.base_seismic is not None:
+			base_crop, local_valid_mask = self._store.read_crop_with_padding(
+				_resolve_manifest_path(manifest, manifest.base_seismic.path),
+				local_request.start_xyz,
+				local_request.size_xyz,
+			)
+			stats = self._stats_for_manifest(manifest)
+			for spec in self.registry.specs:
+				target[spec.id] = generate_mvp_attribute(
+					base_crop,
+					spec.name,
+					stats,
+				)
+				target_valid[spec.id] = True
+			return target, target_valid, local_valid_mask
+
 		for spec in self.registry.specs:
 			record = manifest.attribute_volumes.get(spec.name)
 			if record is None:
 				continue
 			crop, valid_mask = self._store.read_crop_with_padding(
-				_resolve_record_path(manifest, record.path),
+				_resolve_manifest_path(manifest, record.path),
 				local_request.start_xyz,
 				local_request.size_xyz,
 			)
@@ -315,13 +350,37 @@ class NopimsAttributePretrainDataset:
 			self.context_crop_size_xyz,
 			self.context_downsample,
 		)
+		if manifest.base_seismic is not None:
+			base_crop, valid_mask = self._store.read_crop_with_padding(
+				_resolve_manifest_path(manifest, manifest.base_seismic.path),
+				context_request.start_xyz,
+				context_request.size_xyz,
+			)
+			stats = self._stats_for_manifest(manifest)
+			context_volumes = []
+			context_valid_mask = None
+			for id_ in input_ids:
+				attribute = generate_mvp_attribute(base_crop, id_, stats)
+				context_volume, attribute_valid_mask = downsample_context_masked_mean(
+					attribute,
+					valid_mask,
+					self.context_downsample,
+				)
+				context_volumes.append(context_volume)
+				if context_valid_mask is None:
+					context_valid_mask = attribute_valid_mask
+			return (
+				np.stack(context_volumes, axis=0).astype(np.float32, copy=False),
+				context_valid_mask,
+			)
+
 		context_volumes: list[np.ndarray] = []
 		context_valid_mask: np.ndarray | None = None
 		for id_ in input_ids:
 			name = self.registry.id_to_name(id_)
 			record = manifest.get_attribute(name)
 			crop, valid_mask = self._store.read_crop_with_padding(
-				_resolve_record_path(manifest, record.path),
+				_resolve_manifest_path(manifest, record.path),
 				context_request.start_xyz,
 				context_request.size_xyz,
 			)
@@ -339,8 +398,20 @@ class NopimsAttributePretrainDataset:
 			context_valid_mask,
 		)
 
+	def _stats_for_manifest(self, manifest: SurveyManifest) -> NormalizationStats:
+		if manifest.base_seismic is None:
+			msg = f'survey {manifest.survey_id!r} has no base seismic record'
+			raise ValueError(msg)
+		path = _resolve_manifest_path(
+			manifest,
+			manifest.base_seismic.normalization_stats_path,
+		)
+		if path not in self._normalization_stats:
+			self._normalization_stats[path] = load_normalization_stats(path)
+		return self._normalization_stats[path]
 
-def _resolve_record_path(manifest: SurveyManifest, path: Path) -> Path:
+
+def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:
 	if path.is_absolute():
 		return path
 	return manifest.root / path

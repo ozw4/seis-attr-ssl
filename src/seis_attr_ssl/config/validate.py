@@ -11,6 +11,7 @@ from seis_attr_ssl.config.schema import (
 	DISALLOWED_PRETRAINING_KEYS,
 	EXPECTED_ATTRIBUTE_GROUPS,
 	EXPECTED_ATTRIBUTES,
+	EXPECTED_BASE_SEISMIC_KIND,
 	EXPECTED_CONTEXT_CROP_SIZE,
 	EXPECTED_CONTEXT_DOWNSAMPLE,
 	EXPECTED_GRID_ORDER,
@@ -37,6 +38,8 @@ def validate_config(config: _T) -> _T:
 	data = _required_mapping(config, 'data')
 	_validate_equal(data, 'grid_order', EXPECTED_GRID_ORDER)
 	_validate_equal(data, 'volume_format', EXPECTED_VOLUME_FORMAT)
+	_validate_equal(data, 'base_seismic_kind', EXPECTED_BASE_SEISMIC_KIND)
+	_validate_optional_npy_path(data, 'base_seismic_path')
 	_validate_equal(data, 'local_crop_size', EXPECTED_LOCAL_CROP_SIZE)
 	_validate_equal(data, 'context_crop_size', EXPECTED_CONTEXT_CROP_SIZE)
 	_validate_equal(data, 'context_downsample', EXPECTED_CONTEXT_DOWNSAMPLE)
@@ -158,6 +161,18 @@ def _validate_nopims_root(paths: Mapping[str, object]) -> None:
 	if not isinstance(nopims_root, str):
 		msg = f'paths.nopims_root must be a string; got {nopims_root!r}'
 		raise TypeError(msg)
+
+
+def _validate_optional_npy_path(parent: Mapping[str, object], key: str) -> None:
+	value = parent.get(key)
+	if value is None:
+		return
+	if not isinstance(value, str):
+		msg = f'data.{key} must be a string; got {value!r}'
+		raise TypeError(msg)
+	if not value.endswith('.npy'):
+		msg = f'data.{key} must point to a .npy file; got {value!r}'
+		raise ValueError(msg)
 
 
 def _validate_masking(masking: Mapping[str, object]) -> None:

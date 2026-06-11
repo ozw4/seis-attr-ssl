@@ -9,8 +9,10 @@ import yaml
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config import load_config
 from seis_attr_ssl.data import (
+	build_nopims_base_seismic_manifests,
 	build_nopims_manifests,
 	read_manifest_json,
+	scan_nopims_base_seismic_manifests,
 	scan_nopims_manifests,
 )
 from tests.helpers import run_python_proc
@@ -109,9 +111,55 @@ def test_require_all_attributes_raises_for_incomplete_survey(tmp_path: Path) -> 
 		)
 
 
+def test_build_base_seismic_manifests_writes_source_manifest(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	_write_volume(
+		nopims_root,
+		'survey_a',
+		'seismic/dip_steered_median_filtered.npy',
+	)
+	(nopims_root / 'survey_a' / 'normalization_stats.json').write_text(
+		'{"center": 0.0, "scale": 1.0}',
+		encoding='utf-8',
+	)
+	output_path = tmp_path / 'manifests' / 'nopims_base_seismic_manifests.json'
+
+	manifests = build_nopims_base_seismic_manifests(
+		nopims_root=nopims_root,
+		output_path=output_path,
+		scan_pattern='**/*.npy',
+	)
+
+	assert output_path.is_file()
+	loaded = read_manifest_json(output_path)
+	assert loaded == manifests
+	assert loaded[0].base_seismic is not None
+	assert loaded[0].base_seismic.path.name == 'dip_steered_median_filtered.npy'
+	assert loaded[0].base_seismic.normalization_stats_path.name == (
+		'normalization_stats.json'
+	)
+	assert loaded[0].attribute_volumes == {}
+	assert loaded[0].missing_attributes() == ()
+
+
+def test_base_seismic_scan_raises_for_duplicate_survey_source(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	_write_volume(nopims_root, 'survey_a', 'seismic/dip_median_filtered.npy')
+	_write_volume(nopims_root, 'survey_a', 'copy/dip_median_filtered.npy')
+
+	with pytest.raises(ValueError, match='duplicate base seismic'):
+		scan_nopims_base_seismic_manifests(nopims_root, '**/*.npy')
+
+
 def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	nopims_root = tmp_path / 'NOPIMS'
-	_write_volume(nopims_root, 'survey_a', 'attributes/amplitude_norm.npy')
+	_write_volume(nopims_root, 'survey_a', 'seismic/dip_median_filtered.npy')
+	(nopims_root / 'survey_a' / 'normalization_stats.json').write_text(
+		'{"center": 0.0, "scale": 1.0}',
+		encoding='utf-8',
+	)
 	output_dir = tmp_path / 'manifests'
 	config = load_config(PROJECT_ROOT / 'proc/configs/build_nopims_manifests.yaml')
 	config['paths']['nopims_root'] = str(nopims_root)
@@ -126,7 +174,7 @@ def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	)
 
 	assert result.returncode == 0, result.stderr
-	output_path = output_dir / 'nopims_manifests.json'
+	output_path = output_dir / 'nopims_base_seismic_manifests.json'
 	assert output_path.is_file()
 	assert read_manifest_json(output_path)[0].survey_id == 'survey_a'
-	assert 'manifest.missing_attributes.survey_a:' in result.stdout
+	assert 'manifest.base_seismic_count: 1' in result.stdout

@@ -27,6 +27,10 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['stage'] == 'pretrain_mae'
 	assert cfg['project']['package'] == 'seis_attr_ssl'
 	assert cfg['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS/'
+	assert (
+		cfg['manifests']['train']
+		== '/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json'
+	)
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
 	assert len(cfg['attributes']['names']) == 10
@@ -125,6 +129,14 @@ def test_invalid_grid_order_raises_clear_value_error() -> None:
 	cfg['data']['grid_order'] = ['z', 'y', 'x']
 
 	with pytest.raises(ValueError, match='data\\.grid_order'):
+		validate_config(cfg)
+
+
+def test_invalid_base_seismic_path_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['data']['base_seismic_path'] = '/home/dcuser/data/NOPIMS/survey/seismic.dat'
+
+	with pytest.raises(ValueError, match='data\\.base_seismic_path'):
 		validate_config(cfg)
 
 

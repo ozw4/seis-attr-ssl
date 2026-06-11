@@ -1,4 +1,4 @@
-"""Build NOPIMS survey manifests from `.npy` attribute volumes."""
+"""Build NOPIMS survey manifests from base seismic or attribute `.npy` volumes."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from pathlib import Path
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.data.schema import (
+	BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
 	GRID_ORDER_XYZ,
 	AttributeVolumeRecord,
+	BaseSeismicVolumeRecord,
 	SurveyManifest,
 	write_manifest_json,
 )
@@ -24,6 +26,7 @@ class ManifestBuildSummary:
 	attribute_volume_count: int
 	missing_attributes_by_survey: dict[str, tuple[str, ...]]
 	unknown_attribute_counts: dict[str, int]
+	base_seismic_count: int = 0
 	output_path: Path | None = None
 
 
@@ -62,6 +65,27 @@ def build_nopims_manifests(
 		scan_pattern=scan_pattern,
 		registry=registry,
 		require_all_attributes=require_all_attributes,
+	)
+	output_path.parent.mkdir(parents=True, exist_ok=True)
+	write_manifest_json(result.manifests, output_path)
+	return result.manifests
+
+
+def build_nopims_base_seismic_manifests(  # noqa: PLR0913
+	nopims_root: Path,
+	output_path: Path,
+	scan_pattern: str,
+	base_seismic_kind: str = BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
+	base_seismic_name_hints: tuple[str, ...] = ('dip', 'median', 'filtered'),
+	normalization_stats_name: str = 'normalization_stats.json',
+) -> list[SurveyManifest]:
+	"""Scan NOPIMS base seismic `.npy` volumes and write a JSON manifest."""
+	result = scan_nopims_base_seismic_manifests(
+		nopims_root=nopims_root,
+		scan_pattern=scan_pattern,
+		base_seismic_kind=base_seismic_kind,
+		base_seismic_name_hints=base_seismic_name_hints,
+		normalization_stats_name=normalization_stats_name,
 	)
 	output_path.parent.mkdir(parents=True, exist_ok=True)
 	write_manifest_json(result.manifests, output_path)
@@ -135,6 +159,66 @@ def scan_nopims_manifests(
 	)
 
 
+def scan_nopims_base_seismic_manifests(
+	nopims_root: Path,
+	scan_pattern: str,
+	base_seismic_kind: str = BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
+	base_seismic_name_hints: tuple[str, ...] = ('dip', 'median', 'filtered'),
+	normalization_stats_name: str = 'normalization_stats.json',
+) -> ManifestBuildResult:
+	"""Scan NOPIMS `.npy` base seismic volumes without writing JSON."""
+	root = Path(nopims_root)
+	if not root.is_dir():
+		msg = f'NOPIMS root does not exist or is not a directory: {root}'
+		raise FileNotFoundError(msg)
+
+	survey_records: dict[str, BaseSeismicVolumeRecord] = {}
+	unknown_bases: Counter[str] = Counter()
+	hints = tuple(hint.lower() for hint in base_seismic_name_hints)
+	for path in _iter_npy_paths(root, scan_pattern):
+		relative = path.relative_to(root)
+		if len(relative.parts) < 2 or not _matches_base_seismic_hints(relative, hints):
+			unknown_bases[path.stem] += 1
+			continue
+
+		survey_id = relative.parts[0]
+		if survey_id in survey_records:
+			msg = (
+				f'duplicate base seismic volume for survey {survey_id!r}: '
+				f'{survey_records[survey_id].path} and {path}'
+			)
+			raise ValueError(msg)
+		info = inspect_npy_volume(path)
+		survey_root = root / survey_id
+		survey_records[survey_id] = BaseSeismicVolumeRecord(
+			survey_id=survey_id,
+			path=path,
+			kind=base_seismic_kind,
+			shape_xyz=info.shape_xyz,
+			dtype=info.dtype,
+			grid_order=GRID_ORDER_XYZ,
+			normalization_stats_path=survey_root / normalization_stats_name,
+		)
+
+	manifests = [
+		SurveyManifest(
+			survey_id=survey_id,
+			root=root / survey_id,
+			attribute_volumes={},
+			shape_xyz=record.shape_xyz,
+			base_seismic=record,
+		)
+		for survey_id, record in sorted(survey_records.items())
+	]
+	for manifest in manifests:
+		manifest.validate_consistent_shapes()
+
+	return ManifestBuildResult(
+		manifests=manifests,
+		unknown_attribute_counts=dict(sorted(unknown_bases.items())),
+	)
+
+
 def summarize_manifests(
 	manifests: list[SurveyManifest],
 	registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
@@ -154,6 +238,9 @@ def summarize_manifests(
 		),
 		missing_attributes_by_survey=missing,
 		unknown_attribute_counts=dict(sorted((unknown_attribute_counts or {}).items())),
+		base_seismic_count=sum(
+			1 for manifest in manifests if manifest.base_seismic is not None
+		),
 		output_path=output_path,
 	)
 
@@ -180,6 +267,13 @@ def _identify_attribute_name(
 		if part in registry_names:
 			return part
 	return None
+
+
+def _matches_base_seismic_hints(relative_path: Path, hints: tuple[str, ...]) -> bool:
+	if not hints:
+		return True
+	text = relative_path.as_posix().lower()
+	return all(hint in text for hint in hints)
 
 
 def _build_survey_manifest(
@@ -217,7 +311,9 @@ def _build_survey_manifest(
 __all__ = [
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
+	'build_nopims_base_seismic_manifests',
 	'build_nopims_manifests',
+	'scan_nopims_base_seismic_manifests',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 ]
