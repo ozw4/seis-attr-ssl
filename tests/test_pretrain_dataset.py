@@ -233,6 +233,8 @@ def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) ->
 	manifest = _write_manifest(tmp_path / 'survey-a', MVP_ATTRIBUTE_REGISTRY.names)
 	first = _dataset(manifest, samples_per_epoch=3)
 	second = _dataset(manifest, samples_per_epoch=3)
+	first.set_epoch(0)
+	second.set_epoch(0)
 
 	first_sample = first[1]
 	second_sample = second[1]
@@ -251,6 +253,59 @@ def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) ->
 	):
 		np.testing.assert_array_equal(first_sample[key], second_sample[key])
 	assert first_sample['coords'] == second_sample['coords']
+
+
+def test_pretrain_dataset_epoch_zero_repeated_calls_are_reproducible(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_manifest(tmp_path / 'survey-a', MVP_ATTRIBUTE_REGISTRY.names)
+	dataset = _dataset(manifest, samples_per_epoch=3)
+	dataset.set_epoch(0)
+
+	first_sample = dataset[0]
+	second_sample = dataset[0]
+
+	for key in (
+		'x',
+		'target',
+		'attribute_ids',
+		'spatial_mask',
+		'visible_spatial_mask',
+		'attribute_input_mask',
+		'attribute_target_mask',
+		'dropped_attribute_mask',
+		'target_valid',
+		'local_valid_mask',
+	):
+		np.testing.assert_array_equal(first_sample[key], second_sample[key])
+	assert first_sample['coords'] == second_sample['coords']
+
+
+def test_pretrain_dataset_epoch_changes_stochastic_sample(tmp_path: Path) -> None:
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(12, 12, 12),
+	)
+	dataset = _dataset(
+		manifest,
+		patch_size_xyz=(2, 2, 2),
+		max_input_attributes=8,
+		samples_per_epoch=3,
+	)
+
+	dataset.set_epoch(0)
+	epoch_zero = dataset[0]
+	dataset.set_epoch(1)
+	epoch_one = dataset[0]
+
+	changed = (
+		epoch_zero['coords']['local_start_xyz']
+		!= epoch_one['coords']['local_start_xyz']
+		or not np.array_equal(epoch_zero['spatial_mask'], epoch_one['spatial_mask'])
+		or not np.array_equal(epoch_zero['attribute_ids'], epoch_one['attribute_ids'])
+	)
+	assert changed
 
 
 def test_pretrain_dataset_marks_missing_targets_but_samples_available_subset(

@@ -65,6 +65,9 @@ def validate_config(config: _T) -> _T:
 	if 'train' in config:
 		_validate_train(_required_mapping(config, 'train'))
 
+	if 'model' in config:
+		_validate_model(_required_mapping(config, 'model'))
+
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
 
@@ -182,6 +185,21 @@ def _validate_masking(masking: Mapping[str, object]) -> None:
 def _validate_train(train: Mapping[str, object]) -> None:
 	if 'max_steps' in train:
 		_validate_positive_int(train, 'max_steps', prefix='train')
+	if 'samples_per_epoch' in train:
+		_validate_positive_int(train, 'samples_per_epoch', prefix='train')
+	if 'num_workers' in train:
+		_validate_nonnegative_int(train, 'num_workers', prefix='train')
+	if 'shuffle' in train:
+		_validate_bool(train, 'shuffle', prefix='train')
+
+
+def _validate_model(model: Mapping[str, object]) -> None:
+	if 'context_token_min_valid_fraction' in model:
+		_validate_unit_fraction(
+			model,
+			'context_token_min_valid_fraction',
+			prefix='model',
+		)
 
 
 def _validate_probability(parent: Mapping[str, object], key: str) -> float:
@@ -194,6 +212,23 @@ def _validate_probability(parent: Mapping[str, object], key: str) -> float:
 		msg = f'masking.{key} must be in [0, 1); got {probability!r}'
 		raise ValueError(msg)
 	return probability
+
+
+def _validate_unit_fraction(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> float:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{prefix}.{key} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	fraction = float(value)
+	if not 0.0 < fraction <= 1.0:
+		msg = f'{prefix}.{key} must be in (0, 1]; got {fraction!r}'
+		raise ValueError(msg)
+	return fraction
 
 
 def _validate_positive_int(
@@ -211,6 +246,36 @@ def _validate_positive_int(
 		msg = f'{prefix}.{key} must be positive; got {count!r}'
 		raise ValueError(msg)
 	return count
+
+
+def _validate_nonnegative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> int:
+	value = parent.get(key)
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{prefix}.{key} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	count = int(value)
+	if count < 0:
+		msg = f'{prefix}.{key} must be nonnegative; got {count!r}'
+		raise ValueError(msg)
+	return count
+
+
+def _validate_bool(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> bool:
+	value = parent.get(key)
+	if not isinstance(value, bool):
+		msg = f'{prefix}.{key} must be a bool; got {value!r}'
+		raise TypeError(msg)
+	return value
 
 
 def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:

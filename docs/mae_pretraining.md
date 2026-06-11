@@ -40,6 +40,24 @@ batch may include `context: [B, C, X, Y, Z]` and
 For the default config, local crops are `[128, 128, 128]`, patch size is
 `[8, 8, 8]`, and the token grid is `[16, 16, 16]`.
 
+## Dataset Sampling
+
+`NopimsAttributePretrainDataset` samples each item deterministically from the
+configured seed, current epoch, and dataset index. Re-reading the same
+`(seed, epoch, index)` yields the same crop, attribute subset, and MAE spatial
+mask, while advancing the epoch changes the random draw for that index. The MAE
+training loop sets the dataset epoch before each training epoch.
+
+`train.samples_per_epoch` controls how many random crop samples are drawn per
+epoch. When it is omitted, the dataset length defaults to the number of survey
+manifests, but each item is still an epoch-specific random crop sample rather
+than a fixed survey-only record.
+
+For NOPIMS-scale Stage 1 pretraining, `proc/configs/mvp_mae.yaml` defaults to
+`train.samples_per_epoch: 10000`, `train.num_workers: 4`, and
+`train.shuffle: true`. Small synthetic smoke-test configs can override these
+values to keep local runs lightweight.
+
 ## Model
 
 `StrictAttributeSetMAE3D` implements the pretraining model:
@@ -104,4 +122,3 @@ mae_epoch_0002.pt
 
 Each checkpoint contains `model_state_dict`, `optimizer_state_dict`, `epoch`,
 the resolved training `config`, `package_version`, and training `metrics`.
-

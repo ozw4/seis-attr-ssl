@@ -35,7 +35,11 @@ def _make_batch(
 	return batch
 
 
-def _make_model(*, use_context: bool = False) -> StrictAttributeSetMAE3D:
+def _make_model(
+	*,
+	use_context: bool = False,
+	context_token_min_valid_fraction: float = 0.5,
+) -> StrictAttributeSetMAE3D:
 	return StrictAttributeSetMAE3D(
 		patch_size_xyz=(4, 4, 4),
 		encoder_dim=32,
@@ -45,8 +49,47 @@ def _make_model(*, use_context: bool = False) -> StrictAttributeSetMAE3D:
 		decoder_depth=1,
 		decoder_heads=4,
 		num_context_tokens=2,
+		context_token_min_valid_fraction=context_token_min_valid_fraction,
 		use_context=use_context,
 	)
+
+
+def _capture_context_token_valid_mask(
+	model: StrictAttributeSetMAE3D,
+	context_valid_mask: torch.Tensor,
+	monkeypatch: pytest.MonkeyPatch,
+) -> torch.Tensor | None:
+	captured: dict[str, torch.Tensor | None] = {}
+
+	def capture_pooler(
+		context_tokens: torch.Tensor,
+		context_token_valid_mask: torch.Tensor | None = None,
+	) -> torch.Tensor:
+		captured['mask'] = context_token_valid_mask
+		return torch.zeros(
+			(context_tokens.shape[0], model.num_context_tokens, model.encoder_dim),
+			dtype=context_tokens.dtype,
+			device=context_tokens.device,
+		)
+
+	monkeypatch.setattr(model.context_pooler, 'forward', capture_pooler)
+	context = torch.randn((context_valid_mask.shape[0], 3, 8, 4, 4))
+	attribute_ids = torch.arange(3).unsqueeze(0).expand(context.shape[0], -1).clone()
+	spatial_mask = torch.zeros((context.shape[0], 2, 1, 1), dtype=torch.bool)
+	spatial_mask[:, 0, 0, 0] = True
+
+	model(
+		{
+			'x': torch.randn_like(context),
+			'attribute_ids': attribute_ids,
+			'spatial_mask': spatial_mask,
+			'visible_spatial_mask': ~spatial_mask,
+			'context': context,
+			'context_valid_mask': context_valid_mask,
+		},
+	)
+
+	return captured['mask']
 
 
 def test_forward_pass_without_context() -> None:
@@ -66,6 +109,67 @@ def test_forward_pass_with_context() -> None:
 	assert out['pred_patches'].shape == (2, 64, 10, 64)
 	assert out['encoded_tokens'].shape == (2, 62, 32)
 	assert out['decoder_tokens'].shape == (2, 64, 16)
+
+
+def test_fully_valid_context_mask_keeps_all_context_tokens_valid(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model(use_context=True)
+	context_valid_mask = torch.ones((1, 8, 4, 4), dtype=torch.bool)
+
+	context_token_valid_mask = _capture_context_token_valid_mask(
+		model,
+		context_valid_mask,
+		monkeypatch,
+	)
+
+	assert context_token_valid_mask is not None
+	assert context_token_valid_mask.tolist() == [[True, True]]
+
+
+def test_boundary_context_token_below_valid_fraction_is_invalid(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model(use_context=True)
+	context_valid_mask = torch.ones((1, 8, 4, 4), dtype=torch.bool)
+	context_valid_mask[:, :4] = False
+	context_valid_mask[:, :1] = True
+
+	context_token_valid_mask = _capture_context_token_valid_mask(
+		model,
+		context_valid_mask,
+		monkeypatch,
+	)
+
+	assert context_token_valid_mask is not None
+	assert context_token_valid_mask.tolist() == [[False, True]]
+
+
+def test_context_token_above_valid_fraction_threshold_is_valid(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model(use_context=True)
+	context_valid_mask = torch.ones((1, 8, 4, 4), dtype=torch.bool)
+	context_valid_mask[:, :4] = False
+	context_valid_mask[:, :3] = True
+
+	context_token_valid_mask = _capture_context_token_valid_mask(
+		model,
+		context_valid_mask,
+		monkeypatch,
+	)
+
+	assert context_token_valid_mask is not None
+	assert context_token_valid_mask.tolist() == [[True, True]]
+
+
+def test_all_invalid_context_tokens_raise_clear_value_error() -> None:
+	model = _make_model(use_context=True)
+	batch = _make_batch(batch_size=1, use_context=True)
+	batch['context_valid_mask'] = torch.zeros((1, 16, 16, 16), dtype=torch.bool)
+
+	with pytest.raises(ValueError, match='at least one valid context token'):
+		model(batch)
 
 
 def test_encoder_receives_only_visible_local_tokens(

@@ -38,6 +38,7 @@ class StrictAttributeSetMAE3D(nn.Module):
 		decoder_depth: int = 4,
 		decoder_heads: int = 4,
 		num_context_tokens: int = 8,
+		context_token_min_valid_fraction: float = 0.5,
 		use_context: bool = True,
 	) -> None:
 		"""Initialize tokenizers, transformer stacks, and prediction head."""
@@ -49,6 +50,10 @@ class StrictAttributeSetMAE3D(nn.Module):
 		self.num_context_tokens = _validate_positive_int(
 			num_context_tokens,
 			'num_context_tokens',
+		)
+		self.context_token_min_valid_fraction = _validate_fraction(
+			context_token_min_valid_fraction,
+			'context_token_min_valid_fraction',
 		)
 		if not isinstance(use_context, bool):
 			msg = f'use_context must be bool; got {use_context!r}'
@@ -231,6 +236,7 @@ class StrictAttributeSetMAE3D(nn.Module):
 			context_valid_mask,
 			context,
 			self.patch_size_xyz,
+			self.context_token_min_valid_fraction,
 		)
 		return self.context_pooler(context_tokens, context_token_valid_mask)
 
@@ -310,9 +316,14 @@ def _context_token_valid_mask(
 	context_valid_mask: torch.Tensor | None,
 	context: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
+	min_valid_fraction: float,
 ) -> torch.Tensor | None:
 	if context_valid_mask is None:
 		return None
+	min_valid_fraction = _validate_fraction(
+		min_valid_fraction,
+		'min_valid_fraction',
+	)
 	if context_valid_mask.ndim != 4 or tuple(context_valid_mask.shape) != (
 		context.shape[0],
 		context.shape[2],
@@ -338,7 +349,8 @@ def _context_token_valid_mask(
 		context_valid_mask.unsqueeze(1).to(dtype=context.dtype),
 		patch_size_xyz,
 	)
-	return context_patches.squeeze(2).bool().any(dim=-1)
+	valid_fraction = context_patches.squeeze(2).mean(dim=-1)
+	return valid_fraction >= min_valid_fraction
 
 
 def _normalize_attribute_groups(
@@ -365,6 +377,17 @@ def _validate_positive_int(value: int, name: str) -> int:
 		msg = f'{name} must be positive; got {value!r}'
 		raise ValueError(msg)
 	return value
+
+
+def _validate_fraction(value: float, name: str) -> float:
+	if not isinstance(value, float | int) or isinstance(value, bool):
+		msg = f'{name} must be a float; got {value!r}'
+		raise TypeError(msg)
+	fraction = float(value)
+	if not 0.0 < fraction <= 1.0:
+		msg = f'{name} must be in (0, 1]; got {fraction!r}'
+		raise ValueError(msg)
+	return fraction
 
 
 def _validate_patch_size(value: tuple[int, int, int]) -> tuple[int, int, int]:
