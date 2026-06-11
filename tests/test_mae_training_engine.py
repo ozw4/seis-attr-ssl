@@ -13,6 +13,7 @@ from seis_attr_ssl.data import (
 	SurveyManifest,
 	write_manifest_json,
 )
+from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 from seis_attr_ssl.training import load_checkpoint
 from seis_attr_ssl.training.mae import run_mae_pretraining
 
@@ -130,6 +131,26 @@ def test_one_epoch_cpu_training_writes_loadable_checkpoint(tmp_path: Path) -> No
 	assert checkpoint['optimizer_state_dict']
 	loss = checkpoint['metrics']['loss']
 	assert np.isfinite(loss)
+
+
+def test_run_mae_pretraining_sets_dataset_epoch_each_epoch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls: list[int] = []
+	original = NopimsAttributePretrainDataset.set_epoch
+
+	def spy_set_epoch(self: NopimsAttributePretrainDataset, epoch: int) -> None:
+		calls.append(epoch)
+		original(self, epoch)
+
+	monkeypatch.setattr(NopimsAttributePretrainDataset, 'set_epoch', spy_set_epoch)
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['epochs'] = 2
+
+	run_mae_pretraining(cfg)
+
+	assert calls == [0, 1]
 
 
 def test_checkpoint_save_load_round_trip(tmp_path: Path) -> None:

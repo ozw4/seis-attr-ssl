@@ -167,6 +167,9 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 	state: MaeTrainingState | None = None
 	checkpoint_path: Path | None = None
 	for epoch in range(1, epochs + 1):
+		set_epoch = getattr(dataset, 'set_epoch', None)
+		if callable(set_epoch):
+			set_epoch(epoch - 1)
 		remaining_steps = None
 		if max_steps is not None:
 			previous_steps = 0 if state is None else state.global_step

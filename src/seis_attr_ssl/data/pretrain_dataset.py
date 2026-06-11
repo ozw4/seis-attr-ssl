@@ -98,6 +98,7 @@ class NopimsAttributePretrainDataset:
 		self.group_dropout_prob = float(group_dropout_prob)
 
 		self.seed = _validate_nonnegative_int(seed, 'seed')
+		self.epoch = 0
 		if samples_per_epoch is None:
 			self.samples_per_epoch = len(self.manifests)
 		else:
@@ -157,6 +158,10 @@ class NopimsAttributePretrainDataset:
 	def __len__(self) -> int:
 		"""Return configured epoch length."""
 		return self.samples_per_epoch
+
+	def set_epoch(self, epoch: int) -> None:
+		"""Set the sampling epoch used to seed deterministic sample draws."""
+		self.epoch = _validate_nonnegative_int(epoch, 'epoch')
 
 	def __getitem__(self, index: int) -> dict[str, object]:
 		"""Return one MVP-compatible sample dictionary."""
@@ -237,7 +242,7 @@ class NopimsAttributePretrainDataset:
 		}
 
 	def _rng_for_index(self, index: int) -> np.random.Generator:
-		seed_sequence = np.random.SeedSequence([self.seed, index])
+		seed_sequence = np.random.SeedSequence([self.seed, self.epoch, index])
 		return np.random.default_rng(seed_sequence)
 
 	def _validate_manifests(self) -> None:
