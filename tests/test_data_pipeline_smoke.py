@@ -22,6 +22,7 @@ EXPECTED_SAMPLE_KEYS = {
 	'x',
 	'target',
 	'attribute_ids',
+	'attribute_input_mask',
 	'target_attribute_ids',
 	'valid_attributes',
 	'target_valid',
@@ -41,7 +42,7 @@ def _build_synthetic_nopims_tree(root: Path) -> None:
 			np.save(path, np.full(SHAPE_XYZ, value, dtype=np.float32))
 
 
-def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
+def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: PLR0915
 	nopims_root = tmp_path / 'NOPIMS'
 	manifest_path = tmp_path / 'manifests' / 'nopims_manifests.json'
 	_build_synthetic_nopims_tree(nopims_root)
@@ -79,6 +80,7 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
 		x = sample['x']
 		target = sample['target']
 		attribute_ids = sample['attribute_ids']
+		attribute_input_mask = sample['attribute_input_mask']
 		target_attribute_ids = sample['target_attribute_ids']
 		valid_attributes = sample['valid_attributes']
 		context = sample['context']
@@ -88,6 +90,7 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
 		assert isinstance(x, np.ndarray)
 		assert isinstance(target, np.ndarray)
 		assert isinstance(attribute_ids, np.ndarray)
+		assert isinstance(attribute_input_mask, np.ndarray)
 		assert isinstance(target_attribute_ids, np.ndarray)
 		assert isinstance(valid_attributes, np.ndarray)
 		assert isinstance(context, np.ndarray)
@@ -97,6 +100,7 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
 		assert x.dtype == np.float32
 		assert target.dtype == np.float32
 		assert attribute_ids.dtype == np.int64
+		assert attribute_input_mask.dtype == np.bool_
 		assert target_attribute_ids.dtype == np.int64
 		assert valid_attributes.dtype == np.bool_
 		target_valid = sample['target_valid']
@@ -104,6 +108,7 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
 		assert target_valid.dtype == np.bool_
 
 		assert 4 <= len(attribute_ids) <= 6
+		assert attribute_input_mask.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs),)
 		assert x.shape == (len(attribute_ids), *LOCAL_SIZE_XYZ)
 		assert target.shape == (
 			len(MVP_ATTRIBUTE_REGISTRY.specs),
@@ -116,6 +121,10 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:
 		np.testing.assert_array_equal(
 			target_attribute_ids,
 			np.arange(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=np.int64),
+		)
+		np.testing.assert_array_equal(
+			attribute_ids,
+			np.flatnonzero(attribute_input_mask).astype(np.int64),
 		)
 		np.testing.assert_array_equal(
 			sample['target_valid'],

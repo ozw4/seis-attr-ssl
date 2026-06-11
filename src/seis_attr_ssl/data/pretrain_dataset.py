@@ -10,7 +10,6 @@ import numpy as np
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
-	sample_attribute_subset,
 )
 from seis_attr_ssl.data.crop_sampler import (
 	make_context_request,
@@ -18,6 +17,7 @@ from seis_attr_ssl.data.crop_sampler import (
 )
 from seis_attr_ssl.data.downsample import downsample_context_masked_mean
 from seis_attr_ssl.data.volume_store import NpyMemmapVolumeStore
+from seis_attr_ssl.masking import sample_attribute_input_mask
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
@@ -41,6 +41,8 @@ class NopimsAttributePretrainDataset:
 		use_context: bool = True,  # noqa: FBT001, FBT002
 		min_input_attributes: int = 4,
 		max_input_attributes: int = 10,
+		attribute_dropout_prob: float = 0.0,
+		group_dropout_prob: float = 0.0,
 		seed: int = 42,
 		samples_per_epoch: int | None = None,
 	) -> None:
@@ -77,6 +79,8 @@ class NopimsAttributePretrainDataset:
 				'max_input_attributes'
 			)
 			raise ValueError(msg)
+		self.attribute_dropout_prob = float(attribute_dropout_prob)
+		self.group_dropout_prob = float(group_dropout_prob)
 
 		self.seed = _validate_nonnegative_int(seed, 'seed')
 		if samples_per_epoch is None:
@@ -125,11 +129,18 @@ class NopimsAttributePretrainDataset:
 			rng,
 		)
 		available_ids = self._available_attribute_ids(manifest)
-		input_ids = sample_attribute_subset(
+		attribute_input_mask = sample_attribute_input_mask(
 			available_ids,
+			self._target_attribute_ids,
+			self.registry.groups,
 			self.min_input_attributes,
 			self.max_input_attributes,
+			self.attribute_dropout_prob,
+			self.group_dropout_prob,
 			rng,
+		)
+		input_ids = tuple(
+			int(id_) for id_ in self._target_attribute_ids[attribute_input_mask]
 		)
 
 		target, target_valid, local_valid_mask = self._read_target(
@@ -151,6 +162,7 @@ class NopimsAttributePretrainDataset:
 			'x': x,
 			'target': target,
 			'attribute_ids': np.asarray(input_ids, dtype=np.int64),
+			'attribute_input_mask': attribute_input_mask,
 			'target_attribute_ids': self._target_attribute_ids.copy(),
 			'valid_attributes': np.ones(len(input_ids), dtype=bool),
 			'target_valid': target_valid,

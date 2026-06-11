@@ -91,6 +91,7 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 		'x',
 		'target',
 		'attribute_ids',
+		'attribute_input_mask',
 		'target_attribute_ids',
 		'valid_attributes',
 		'target_valid',
@@ -102,11 +103,15 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 	x = sample['x']
 	target = sample['target']
 	attribute_ids = sample['attribute_ids']
+	attribute_input_mask = sample['attribute_input_mask']
 	assert isinstance(x, np.ndarray)
 	assert isinstance(target, np.ndarray)
 	assert isinstance(attribute_ids, np.ndarray)
+	assert isinstance(attribute_input_mask, np.ndarray)
 	assert x.shape == (len(attribute_ids), *LOCAL_SIZE)
 	assert target.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs), *LOCAL_SIZE)
+	assert attribute_input_mask.shape == (len(MVP_ATTRIBUTE_REGISTRY.specs),)
+	assert attribute_input_mask.dtype == np.bool_
 	assert sample['context'].shape == (len(attribute_ids), *LOCAL_SIZE)
 	assert sample['context_valid_mask'].shape == LOCAL_SIZE
 	assert sample['local_valid_mask'].shape == LOCAL_SIZE
@@ -115,6 +120,10 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 	np.testing.assert_array_equal(
 		sample['target_attribute_ids'],
 		np.arange(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=np.int64),
+	)
+	np.testing.assert_array_equal(
+		attribute_ids,
+		np.flatnonzero(attribute_input_mask).astype(np.int64),
 	)
 	np.testing.assert_array_equal(sample['target_valid'], np.ones(10, dtype=bool))
 	for row, id_ in enumerate(attribute_ids):
@@ -129,7 +138,14 @@ def test_pretrain_dataset_is_deterministic_for_seed_and_index(tmp_path: Path) ->
 	first_sample = first[1]
 	second_sample = second[1]
 
-	for key in ('x', 'target', 'attribute_ids', 'target_valid', 'local_valid_mask'):
+	for key in (
+		'x',
+		'target',
+		'attribute_ids',
+		'attribute_input_mask',
+		'target_valid',
+		'local_valid_mask',
+	):
 		np.testing.assert_array_equal(first_sample[key], second_sample[key])
 	assert first_sample['coords'] == second_sample['coords']
 
