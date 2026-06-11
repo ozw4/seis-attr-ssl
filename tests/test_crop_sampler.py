@@ -9,7 +9,10 @@ from seis_attr_ssl.data.crop_sampler import (
 	sample_random_center,
 	sample_random_local_crop,
 )
-from seis_attr_ssl.data.downsample import downsample_context_mean
+from seis_attr_ssl.data.downsample import (
+	downsample_context_masked_mean,
+	downsample_context_mean,
+)
 
 LOCAL_SIZE = (128, 128, 128)
 CONTEXT_SIZE = (512, 512, 512)
@@ -136,6 +139,58 @@ def test_downsample_context_mean_shape_dtype_and_values() -> None:
 	assert downsampled.shape == (2, 2, 2)
 	assert downsampled.dtype == np.float32
 	np.testing.assert_array_equal(downsampled, expected.astype(np.float32))
+
+
+def test_downsample_context_masked_mean_matches_mean_when_fully_valid() -> None:
+	volume = np.arange(4 * 4 * 4, dtype=np.float32).reshape((4, 4, 4))
+	valid_mask = np.ones_like(volume, dtype=bool)
+
+	downsampled, downsampled_mask = downsample_context_masked_mean(
+		volume,
+		valid_mask,
+		2,
+	)
+
+	np.testing.assert_array_equal(downsampled, downsample_context_mean(volume, 2))
+	np.testing.assert_array_equal(
+		downsampled_mask,
+		np.ones((2, 2, 2), dtype=bool),
+	)
+
+
+def test_downsample_context_masked_mean_ignores_invalid_padding() -> None:
+	volume = np.ones((4, 4, 4), dtype=np.float32)
+	valid_mask = np.zeros((4, 4, 4), dtype=bool)
+	valid_mask[:2, :, :] = True
+
+	downsampled, downsampled_mask = downsample_context_masked_mean(
+		volume,
+		valid_mask,
+		4,
+	)
+
+	np.testing.assert_array_equal(
+		downsampled,
+		np.ones((1, 1, 1), dtype=np.float32),
+	)
+	np.testing.assert_array_equal(downsampled_mask, np.ones((1, 1, 1), dtype=bool))
+
+
+def test_downsample_context_masked_mean_marks_all_invalid_blocks() -> None:
+	volume = np.ones((4, 4, 4), dtype=np.float32)
+	valid_mask = np.zeros((4, 4, 4), dtype=bool)
+
+	downsampled, downsampled_mask = downsample_context_masked_mean(
+		volume,
+		valid_mask,
+		4,
+	)
+
+	np.testing.assert_array_equal(
+		downsampled,
+		np.zeros((1, 1, 1), dtype=np.float32),
+	)
+	np.testing.assert_array_equal(downsampled_mask, np.zeros((1, 1, 1), dtype=bool))
 
 
 def test_downsample_context_mean_rejects_non_divisible_shape() -> None:
