@@ -100,6 +100,8 @@ class UnlabeledPretrainingSample(TypedDict):
 	target_valid: TensorLike
 	coords: dict[str, object]
 	context: TensorLike | None
+	context_valid_mask: TensorLike | None
+	local_valid_mask: TensorLike
 
 
 def survey_manifest_to_dict(manifest: SurveyManifest) -> dict[str, object]:
