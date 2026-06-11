@@ -17,6 +17,7 @@ Project identifiers:
 Repository: ozw4/seis-attr-ssl
 Display name: SeisAttrSSL
 Python package: seis_attr_ssl
+Repository/package name used in code: seis_attr_ssl
 ```
 
 ## 2. Fixed Decisions
@@ -54,6 +55,7 @@ Data root: /home/dcuser/data/NOPIMS/
 Base seismic: dip-steered median filtered seismic
 File format: .npy memmap
 Reader: np.load(path, mmap_mode="r")
+Manifest kind: source base seismic manifest
 ```
 
 Fine-tuning and evaluation data:
@@ -95,6 +97,9 @@ context_after_downsample: [128, 128, 128]
 ```
 
 ## 5. Attributes and Normalization
+
+MVP attributes are generated on the fly from normalized source seismic crops.
+Precomputed 10-attribute volumes are not required for Stage 1 pretraining.
 
 Pre-attribute normalization:
 
@@ -155,7 +160,7 @@ The main pipeline is:
 NOPIMS 3D seismic surveys
   -> dip-steered median filtered seismic
   -> survey-wise robust normalization
-  -> attribute generation
+  -> on-the-fly MVP attribute generation from local/context crops
   -> strict 3D attribute-set MAE pretraining
   -> external-data dense adaptation
   -> F3 few-label fine-tuning
@@ -187,6 +192,12 @@ train:
 
 Synthetic smoke-test configs may override these training values to use shorter
 epochs or single-process loading.
+
+The default pretraining manifest is a source-seismic manifest such as
+`/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json`.
+Manifest entries point to dip-steered median filtered `.npy` source volumes and
+survey-wise robust normalization stats; they do not need precomputed attribute
+paths.
 
 ## 8. F3 Evaluation Protocol
 

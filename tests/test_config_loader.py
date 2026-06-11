@@ -33,6 +33,7 @@ def test_loads_valid_mvp_config() -> None:
 		== '/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json'
 	)
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
+	assert cfg['data']['attribute_mode'] == 'on_the_fly'
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
 	assert len(cfg['attributes']['names']) == 10
 	assert cfg['train']['samples_per_epoch'] == 10000
@@ -153,6 +154,14 @@ def test_base_seismic_kind_is_required_for_pretraining_stage() -> None:
 	del cfg['data']['base_seismic_kind']
 
 	with pytest.raises(ValueError, match='data\\.base_seismic_kind'):
+		validate_config(cfg)
+
+
+def test_invalid_attribute_mode_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['data']['attribute_mode'] = 'precomputed'
+
+	with pytest.raises(ValueError, match='data\\.attribute_mode'):
 		validate_config(cfg)
 
 

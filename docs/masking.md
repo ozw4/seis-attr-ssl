@@ -89,8 +89,9 @@ x.shape[0] == attribute_ids.shape[0]
 
 ## Attribute Dropout
 
-The MVP starts from available manifest attributes and samples input-visible
-attributes for each sample. `amplitude_norm` is required and always included.
+The MVP starts from attributes generated on the fly from the source-seismic
+manifest and samples input-visible attributes for each sample. `amplitude_norm`
+is required and always included.
 Group dropout may remove a whole non-required attribute group when the minimum
 input count can still be satisfied. Attribute dropout may remove individual
 non-required attributes. The sampler then refills to `min_input_attributes` if

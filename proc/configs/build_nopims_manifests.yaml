@@ -10,6 +10,7 @@ data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
   base_seismic_kind: dip_steered_median_filtered
+  attribute_mode: on_the_fly
   local_crop_size: [128, 128, 128]
   context_crop_size: [512, 512, 512]
   context_downsample: 4

@@ -7,8 +7,9 @@ This page documents the Stage 1 strict 3D attribute-set MAE pretraining path.
 Stage 1 uses external NOPIMS data only. F3 is not used for pretraining; it is
 reserved for few-label fine-tuning and held-out evaluation.
 
-The MVP pretraining input and target set is the generated seismic attribute
-registry in `proc/configs/mvp_mae.yaml`. External structural prediction
+The MVP pretraining input and target set is the seismic attribute registry in
+`proc/configs/mvp_mae.yaml`, generated on the fly from dip-steered median
+filtered source seismic `.npy` memmaps. External structural prediction
 attributes, such as fault, channel, salt, or horizon probability volumes, are
 not pretraining inputs or targets. The masked inpainting baseline is not part of
 the MVP.
@@ -95,6 +96,15 @@ Validate the MAE config without training:
 
 ```bash
 python proc/train_mae.py --dry-run
+```
+
+The dry-run test module is a local developer check. Required review validation
+uses:
+
+```bash
+python -m compileall -q src proc tests
+python -m ruff check .
+pytest -q --ignore=tests/test_proc_dry_run.py
 ```
 
 Run Stage 1 pretraining:
