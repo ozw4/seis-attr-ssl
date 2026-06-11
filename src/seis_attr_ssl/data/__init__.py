@@ -27,6 +27,13 @@ if TYPE_CHECKING:
 		scan_nopims_manifests,
 		summarize_manifests,
 	)
+	from seis_attr_ssl.data.normalization import (
+		SurveyNormalizationStats,
+		compute_normalization_stats,
+		load_normalization_stats,
+		normalize_amplitude,
+		write_normalization_stats,
+	)
 	from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 	from seis_attr_ssl.data.schema import (
 		BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
@@ -62,14 +69,18 @@ __all__ = [
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
 	'SurveyManifest',
+	'SurveyNormalizationStats',
 	'TensorLike',
 	'UnlabeledPretrainingSample',
 	'build_nopims_base_seismic_manifests',
 	'build_nopims_manifests',
 	'compute_centered_start',
+	'compute_normalization_stats',
 	'downsample_context_mean',
 	'inspect_npy_volume',
+	'load_normalization_stats',
 	'make_context_request',
+	'normalize_amplitude',
 	'read_manifest_json',
 	'sample_attribute_subset',
 	'sample_random_center',
@@ -80,6 +91,7 @@ __all__ = [
 	'survey_manifest_from_dict',
 	'survey_manifest_to_dict',
 	'write_manifest_json',
+	'write_normalization_stats',
 ]
 
 _MANIFEST_BUILDER_EXPORTS = {
@@ -113,6 +125,14 @@ _PRETRAIN_DATASET_EXPORTS = {
 	'NopimsAttributePretrainDataset',
 }
 
+_NORMALIZATION_EXPORTS = {
+	'SurveyNormalizationStats',
+	'compute_normalization_stats',
+	'load_normalization_stats',
+	'normalize_amplitude',
+	'write_normalization_stats',
+}
+
 _SCHEMA_EXPORTS = {
 	'GRID_ORDER_XYZ',
 	'AttributeVolumeRecord',
@@ -139,6 +159,7 @@ _EXPORT_MODULES = {
 	**dict.fromkeys(_CROP_SAMPLER_EXPORTS, 'seis_attr_ssl.data.crop_sampler'),
 	**dict.fromkeys(_ATTRIBUTE_SUBSET_EXPORTS, 'seis_attr_ssl.data.attribute_subset'),
 	**dict.fromkeys(_DOWNSAMPLE_EXPORTS, 'seis_attr_ssl.data.downsample'),
+	**dict.fromkeys(_NORMALIZATION_EXPORTS, 'seis_attr_ssl.data.normalization'),
 	**dict.fromkeys(_PRETRAIN_DATASET_EXPORTS, 'seis_attr_ssl.data.pretrain_dataset'),
 	**dict.fromkeys(_SCHEMA_EXPORTS, 'seis_attr_ssl.data.schema'),
 	**dict.fromkeys(_VOLUME_STORE_EXPORTS, 'seis_attr_ssl.data.volume_store'),

@@ -43,6 +43,7 @@ DISALLOWED_PRETRAINING_KEYS: Final = {'f3', 'f3_root', 'f3_dataset', 'f3_data'}
 F3_ALLOWED_STAGES: Final = {'finetune_f3', 'eval_f3'}
 KNOWN_STAGES: Final = {
 	'build_nopims_manifests',
+	'prepare_normalization_stats',
 	'generate_attributes',
 	'pretrain_mae',
 	'dense_adaptation',

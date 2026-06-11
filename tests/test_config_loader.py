@@ -10,6 +10,7 @@ from tests.helpers import run_python_proc
 
 DEFAULT_CONFIGS = [
 	Path('proc/configs/build_nopims_manifests.yaml'),
+	Path('proc/configs/mvp_prepare_stats.yaml'),
 	Path('proc/configs/generate_attributes_nopims.yaml'),
 	Path('proc/configs/mvp_mae.yaml'),
 	Path('proc/configs/mvp_dense_adapt.yaml'),

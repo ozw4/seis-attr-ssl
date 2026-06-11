@@ -2,46 +2,27 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 from seis_attr_ssl.attributes.registry import MVP_ATTRIBUTE_REGISTRY
+from seis_attr_ssl.data.normalization import (
+	SurveyNormalizationStats,
+	load_normalization_stats,
+	normalize_amplitude,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
 
-
-@dataclass(frozen=True)
-class NormalizationStats:
-	"""Survey-level robust normalization statistics for base seismic."""
-
-	center: float
-	scale: float
-	epsilon: float = 1.0e-6
-
-
-def load_normalization_stats(path: str | Path) -> NormalizationStats:
-	"""Load required survey-level normalization statistics from JSON."""
-	stats_path = Path(path)
-	data = json.loads(stats_path.read_text(encoding='utf-8'))
-	if not isinstance(data, dict):
-		msg = f'normalization stats must be a JSON object: {stats_path}'
-		raise TypeError(msg)
-	return NormalizationStats(
-		center=_required_float(data, 'center', stats_path),
-		scale=_required_positive_float(data, 'scale', stats_path),
-		epsilon=_optional_positive_float(data, 'epsilon', stats_path),
-	)
+NormalizationStats = SurveyNormalizationStats
 
 
 def generate_mvp_attribute(
 	base_crop: np.ndarray,
 	attribute_name_or_id: str | int,
-	stats: NormalizationStats,
+	stats: SurveyNormalizationStats,
 ) -> np.ndarray:
 	"""Generate one MVP attribute volume from a base seismic crop."""
 	name = (
@@ -59,14 +40,10 @@ def generate_mvp_attribute(
 
 def normalize_base_seismic(
 	base_crop: np.ndarray,
-	stats: NormalizationStats,
+	stats: SurveyNormalizationStats,
 ) -> np.ndarray:
 	"""Apply survey-wise robust normalization to a base seismic crop."""
-	scale = max(float(stats.scale), float(stats.epsilon))
-	return ((base_crop.astype(np.float32, copy=False) - stats.center) / scale).astype(
-		np.float32,
-		copy=False,
-	)
+	return normalize_amplitude(base_crop, stats)
 
 
 def _gradient_magnitude(array: np.ndarray) -> np.ndarray:
@@ -152,40 +129,6 @@ _ATTRIBUTE_GENERATORS: dict[str, Callable[[np.ndarray], np.ndarray]] = {
 	'glcm_contrast': _glcm_contrast,
 	'glcm_homogeneity': _glcm_homogeneity,
 }
-
-
-def _required_float(data: dict[object, object], key: str, path: Path) -> float:
-	value = data.get(key)
-	if isinstance(value, bool) or not isinstance(value, int | float):
-		msg = f'normalization stats {path} must define numeric {key!r}'
-		raise TypeError(msg)
-	return float(value)
-
-
-def _required_positive_float(
-	data: dict[object, object],
-	key: str,
-	path: Path,
-) -> float:
-	value = _required_float(data, key, path)
-	if value <= 0.0:
-		msg = f'normalization stats {path} field {key!r} must be positive'
-		raise ValueError(msg)
-	return value
-
-
-def _optional_positive_float(
-	data: dict[object, object],
-	key: str,
-	path: Path,
-) -> float:
-	if key not in data:
-		return 1.0e-6
-	value = _required_float(data, key, path)
-	if value <= 0.0:
-		msg = f'normalization stats {path} field {key!r} must be positive'
-		raise ValueError(msg)
-	return value
 
 
 __all__ = [

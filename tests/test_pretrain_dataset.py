@@ -88,7 +88,20 @@ def _write_base_manifest(
 	)
 	stats_path = root / 'normalization_stats.json'
 	stats_path.write_text(
-		'{"center": 0.0, "scale": 10.0, "epsilon": 1.0e-6}',
+		(
+			'{'
+			'"survey_id": "survey-a", '
+			f'"source_path": "{seismic_path}", '
+			'"grid_order": ["x", "y", "z"], '
+			'"clip_low_percentile": 0.5, '
+			'"clip_high_percentile": 99.5, '
+			'"clip_low": 0.0, '
+			'"clip_high": 999.0, '
+			'"median": 0.0, '
+			'"iqr": 10.0, '
+			'"eps": 1.0e-6'
+			'}'
+		),
 		encoding='utf-8',
 	)
 	return SurveyManifest(

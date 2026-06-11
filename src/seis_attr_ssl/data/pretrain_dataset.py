@@ -10,9 +10,7 @@ import numpy as np
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.attributes.on_the_fly import (
-	NormalizationStats,
 	generate_mvp_attribute,
-	load_normalization_stats,
 )
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
@@ -22,6 +20,10 @@ from seis_attr_ssl.data.crop_sampler import (
 	sample_random_local_crop,
 )
 from seis_attr_ssl.data.downsample import downsample_context_masked_mean
+from seis_attr_ssl.data.normalization import (
+	SurveyNormalizationStats,
+	load_normalization_stats,
+)
 from seis_attr_ssl.data.volume_store import NpyMemmapVolumeStore
 from seis_attr_ssl.masking import build_mae_masking_plan
 
@@ -124,7 +126,7 @@ class NopimsAttributePretrainDataset:
 			[spec.id for spec in self.registry.specs],
 			dtype=np.int64,
 		)
-		self._normalization_stats: dict[Path, NormalizationStats] = {}
+		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
 		self._validate_manifests()
 
 	@classmethod
@@ -398,7 +400,7 @@ class NopimsAttributePretrainDataset:
 			context_valid_mask,
 		)
 
-	def _stats_for_manifest(self, manifest: SurveyManifest) -> NormalizationStats:
+	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:
 		if manifest.base_seismic is None:
 			msg = f'survey {manifest.survey_id!r} has no base seismic record'
 			raise ValueError(msg)
