@@ -8,6 +8,7 @@ from tests.helpers import run_python_proc
 
 PROC_SCRIPTS = (
 	Path('proc/build_nopims_manifests.py'),
+	Path('proc/prepare_normalization_stats.py'),
 	Path('proc/generate_attributes.py'),
 	Path('proc/train_mae.py'),
 	Path('proc/train_dense_adapt.py'),

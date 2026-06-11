@@ -8,9 +8,18 @@ DEFAULT_NOPIMS_ROOT: Final = '/home/dcuser/data/NOPIMS/'
 
 EXPECTED_GRID_ORDER: Final = ['x', 'y', 'z']
 EXPECTED_VOLUME_FORMAT: Final = 'npy_memmap'
+EXPECTED_BASE_SEISMIC_KIND: Final = 'dip_steered_median_filtered'
 EXPECTED_LOCAL_CROP_SIZE: Final = [128, 128, 128]
 EXPECTED_CONTEXT_CROP_SIZE: Final = [512, 512, 512]
 EXPECTED_CONTEXT_DOWNSAMPLE: Final = 4
+BASE_SEISMIC_REQUIRED_STAGES: Final = {
+	'build_nopims_manifests',
+	'prepare_normalization_stats',
+	'generate_attributes',
+	'pretrain_mae',
+	'dense_adaptation',
+	'infer_volume',
+}
 
 EXPECTED_ATTRIBUTES: Final = [
 	'amplitude_norm',
@@ -42,6 +51,7 @@ DISALLOWED_PRETRAINING_KEYS: Final = {'f3', 'f3_root', 'f3_dataset', 'f3_data'}
 F3_ALLOWED_STAGES: Final = {'finetune_f3', 'eval_f3'}
 KNOWN_STAGES: Final = {
 	'build_nopims_manifests',
+	'prepare_normalization_stats',
 	'generate_attributes',
 	'pretrain_mae',
 	'dense_adaptation',

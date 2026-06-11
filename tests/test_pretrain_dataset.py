@@ -7,7 +7,11 @@ import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config import load_config
-from seis_attr_ssl.data import AttributeVolumeRecord, SurveyManifest
+from seis_attr_ssl.data import (
+	AttributeVolumeRecord,
+	BaseSeismicVolumeRecord,
+	SurveyManifest,
+)
 from seis_attr_ssl.data.attribute_subset import sample_attribute_subset
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 
@@ -69,6 +73,51 @@ def _manifest_metadata(
 			for name in attribute_names
 		},
 		shape_xyz=shape_xyz,
+	)
+
+
+def _write_base_manifest(
+	root: Path,
+	shape_xyz: tuple[int, int, int] = (10, 10, 10),
+) -> SurveyManifest:
+	seismic_path = root / 'dip_steered_median_filtered.npy'
+	seismic_path.parent.mkdir(parents=True, exist_ok=True)
+	np.save(
+		seismic_path,
+		np.arange(np.prod(shape_xyz), dtype=np.float32).reshape(shape_xyz),
+	)
+	stats_path = root / 'normalization_stats.json'
+	stats_path.write_text(
+		(
+			'{'
+			'"survey_id": "survey-a", '
+			f'"source_path": "{seismic_path}", '
+			'"grid_order": ["x", "y", "z"], '
+			'"clip_low_percentile": 0.5, '
+			'"clip_high_percentile": 99.5, '
+			'"clip_low": 0.0, '
+			'"clip_high": 999.0, '
+			'"median": 0.0, '
+			'"iqr": 10.0, '
+			'"eps": 1.0e-6'
+			'}'
+		),
+		encoding='utf-8',
+	)
+	return SurveyManifest(
+		survey_id='survey-a',
+		root=root,
+		attribute_volumes={},
+		shape_xyz=shape_xyz,
+		base_seismic=BaseSeismicVolumeRecord(
+			survey_id='survey-a',
+			path=Path('dip_steered_median_filtered.npy'),
+			kind='dip_steered_median_filtered',
+			shape_xyz=shape_xyz,
+			dtype='float32',
+			grid_order=('x', 'y', 'z'),
+			normalization_stats_path=Path('normalization_stats.json'),
+		),
 	)
 
 
@@ -180,6 +229,44 @@ def test_pretrain_dataset_sample_contract_shapes_and_order(tmp_path: Path) -> No
 	)
 	for row, id_ in enumerate(attribute_ids):
 		np.testing.assert_array_equal(x[row], target[id_])
+
+
+def test_pretrain_dataset_generates_attributes_from_base_seismic(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a')
+	dataset = _dataset(manifest, use_context=False)
+
+	sample = dataset[0]
+
+	assert sample['target'].shape == (len(MVP_ATTRIBUTE_REGISTRY.specs), *LOCAL_SIZE)
+	assert sample['x'].shape == (len(sample['attribute_ids']), *LOCAL_SIZE)
+	np.testing.assert_array_equal(
+		sample['target_valid'],
+		np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+	)
+	np.testing.assert_array_equal(
+		sample['local_valid_mask'],
+		np.ones(LOCAL_SIZE, dtype=bool),
+	)
+	for row, id_ in enumerate(sample['attribute_ids']):
+		np.testing.assert_array_equal(sample['x'][row], sample['target'][id_])
+
+
+def test_pretrain_dataset_requires_base_normalization_stats(tmp_path: Path) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a')
+	(manifest.root / 'normalization_stats.json').unlink()
+
+	with pytest.raises(FileNotFoundError, match='normalization stats'):
+		_dataset(manifest, use_context=False)
+
+
+def test_pretrain_dataset_requires_base_seismic_file(tmp_path: Path) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a')
+	(manifest.root / 'dip_steered_median_filtered.npy').unlink()
+
+	with pytest.raises(FileNotFoundError, match='base seismic file'):
+		_dataset(manifest, use_context=False)
 
 
 def test_pretrain_dataset_default_mae_spatial_mask_shape_and_ratio(

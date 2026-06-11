@@ -6,13 +6,11 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS/
   output_root: runs
 
-manifests:
-  train: /home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json
-
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
   base_seismic_kind: dip_steered_median_filtered
+  base_seismic_path: /home/dcuser/data/NOPIMS/survey/seismic/dip_steered_median_filtered.npy
   local_crop_size: [128, 128, 128]
   context_crop_size: [512, 512, 512]
   context_downsample: 4
@@ -52,44 +50,10 @@ normalization:
     trace_wise_agc: false
     patch_wise_zscore: false
 
-stage: pretrain_mae
+stage: prepare_normalization_stats
 
-masking:
-  spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
-  block_size_tokens: [2, 2, 2]
-  min_input_attributes: 4
-  max_input_attributes: 10
-  attribute_dropout_prob: 0.30
-  group_dropout_prob: 0.20
-
-model:
-  name: strict_attribute_set_mae3d
-  patch_size: [8, 8, 8]
-  encoder_dim: 384
-  encoder_depth: 8
-  encoder_heads: 6
-  decoder_dim: 256
-  decoder_depth: 4
-  decoder_heads: 4
-  num_context_tokens: 8
-  context_token_min_valid_fraction: 0.5
-
-loss:
-  reconstruction: huber
-  huber_delta: 1.0
-  dropped_attribute_weight: 0.25
-  gradient_weight: 0.05
-  family_balanced: true
-
-train:
-  batch_size: 1
-  samples_per_epoch: 10000
-  num_workers: 4
-  shuffle: true
-  epochs: 100
-  lr: 1.0e-4
-  weight_decay: 0.05
-  amp: true
-  device: auto
+normalization_stats:
+  survey_id: survey
+  output_path: /home/dcuser/data/NOPIMS/survey/normalization_stats.json
+  max_samples: 1000000
   seed: 42

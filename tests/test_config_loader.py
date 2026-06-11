@@ -10,6 +10,7 @@ from tests.helpers import run_python_proc
 
 DEFAULT_CONFIGS = [
 	Path('proc/configs/build_nopims_manifests.yaml'),
+	Path('proc/configs/mvp_prepare_stats.yaml'),
 	Path('proc/configs/generate_attributes_nopims.yaml'),
 	Path('proc/configs/mvp_mae.yaml'),
 	Path('proc/configs/mvp_dense_adapt.yaml'),
@@ -27,6 +28,10 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['stage'] == 'pretrain_mae'
 	assert cfg['project']['package'] == 'seis_attr_ssl'
 	assert cfg['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS/'
+	assert (
+		cfg['manifests']['train']
+		== '/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json'
+	)
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
 	assert len(cfg['attributes']['names']) == 10
@@ -125,6 +130,29 @@ def test_invalid_grid_order_raises_clear_value_error() -> None:
 	cfg['data']['grid_order'] = ['z', 'y', 'x']
 
 	with pytest.raises(ValueError, match='data\\.grid_order'):
+		validate_config(cfg)
+
+
+def test_invalid_base_seismic_path_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['data']['base_seismic_path'] = '/home/dcuser/data/NOPIMS/survey/seismic.dat'
+
+	with pytest.raises(ValueError, match='data\\.base_seismic_path'):
+		validate_config(cfg)
+
+
+def test_base_seismic_kind_is_not_required_for_f3_stage() -> None:
+	cfg = load_config(Path('proc/configs/mvp_finetune_f3.yaml'))
+	del cfg['data']['base_seismic_kind']
+
+	validate_config(cfg)
+
+
+def test_base_seismic_kind_is_required_for_pretraining_stage() -> None:
+	cfg = _valid_config()
+	del cfg['data']['base_seismic_kind']
+
+	with pytest.raises(ValueError, match='data\\.base_seismic_kind'):
 		validate_config(cfg)
 
 
