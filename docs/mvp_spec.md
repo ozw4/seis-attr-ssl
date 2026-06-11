@@ -96,6 +96,15 @@ context_downsample: 4
 context_after_downsample: [128, 128, 128]
 ```
 
+Halo-aware on-the-fly attribute defaults:
+
+```yaml
+data:
+  local_attribute_halo: [16, 16, 64]
+  context_attribute_halo: [8, 8, 16]
+  require_full_halo_inside_volume: true
+```
+
 ## 5. Attributes and Normalization
 
 MVP attributes are generated on the fly from normalized source seismic crops.

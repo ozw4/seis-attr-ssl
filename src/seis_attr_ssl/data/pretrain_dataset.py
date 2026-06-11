@@ -4,21 +4,23 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from numbers import Integral, Real
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.attributes.on_the_fly import (
-	generate_mvp_attributes,
+	generate_mvp_attributes_for_payload,
 	normalize_base_seismic,
 )
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
 )
 from seis_attr_ssl.data.crop_sampler import (
+	expand_request_with_halo,
 	make_context_request,
 	sample_random_local_crop,
+	sample_random_local_crop_with_margin,
 )
 from seis_attr_ssl.data.downsample import downsample_context_masked_mean
 from seis_attr_ssl.data.normalization import (
@@ -45,8 +47,11 @@ class NopimsAttributePretrainDataset:
 		manifests: Sequence[SurveyManifest],
 		registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
 		local_crop_size_xyz: Sequence[int] = (128, 128, 128),
+		local_attribute_halo_xyz: Sequence[int] = (16, 16, 64),
+		require_full_halo_inside_volume: bool = True,  # noqa: FBT001, FBT002
 		context_crop_size_xyz: Sequence[int] = (512, 512, 512),
 		context_downsample: int = 4,
+		context_attribute_halo_xyz: Sequence[int] = (8, 8, 16),
 		use_context: bool = True,  # noqa: FBT001, FBT002
 		patch_size_xyz: Sequence[int] = (8, 8, 8),
 		spatial_mask_ratio: float = 0.75,
@@ -69,6 +74,14 @@ class NopimsAttributePretrainDataset:
 			local_crop_size_xyz,
 			'local_crop_size_xyz',
 		)
+		self.local_attribute_halo_xyz = _validate_nonnegative_xyz(
+			local_attribute_halo_xyz,
+			'local_attribute_halo_xyz',
+		)
+		self.require_full_halo_inside_volume = _validate_bool(
+			require_full_halo_inside_volume,
+			'require_full_halo_inside_volume',
+		)
 		self.context_crop_size_xyz = _validate_xyz(
 			context_crop_size_xyz,
 			'context_crop_size_xyz',
@@ -76,6 +89,10 @@ class NopimsAttributePretrainDataset:
 		self.context_downsample = _validate_positive_int(
 			context_downsample,
 			'context_downsample',
+		)
+		self.context_attribute_halo_xyz = _validate_nonnegative_xyz(
+			context_attribute_halo_xyz,
+			'context_attribute_halo_xyz',
 		)
 		self.use_context = bool(use_context)
 		self.patch_size_xyz = _validate_xyz(patch_size_xyz, 'patch_size_xyz')
@@ -149,8 +166,11 @@ class NopimsAttributePretrainDataset:
 			manifests,
 			registry=registry,
 			local_crop_size_xyz=data['local_crop_size'],
+			local_attribute_halo_xyz=data['local_attribute_halo'],
+			require_full_halo_inside_volume=data['require_full_halo_inside_volume'],
 			context_crop_size_xyz=data['context_crop_size'],
 			context_downsample=data['context_downsample'],
+			context_attribute_halo_xyz=data['context_attribute_halo'],
 			use_context=data['use_context'],
 			patch_size_xyz=model['patch_size'],
 			spatial_mask_ratio=masking['spatial_mask_ratio'],
@@ -186,10 +206,22 @@ class NopimsAttributePretrainDataset:
 
 		manifest = self.manifests[index % len(self.manifests)]
 		rng = self._rng_for_index(index)
-		local_request = sample_random_local_crop(
-			manifest.shape_xyz,
-			self.local_crop_size_xyz,
-			rng,
+		if self.require_full_halo_inside_volume:
+			local_request = sample_random_local_crop_with_margin(
+				manifest.shape_xyz,
+				self.local_crop_size_xyz,
+				self._sampling_margin_xyz(),
+				rng,
+			)
+		else:
+			local_request = sample_random_local_crop(
+				manifest.shape_xyz,
+				self.local_crop_size_xyz,
+				rng,
+			)
+		local_compute_request, _ = expand_request_with_halo(
+			local_request,
+			self.local_attribute_halo_xyz,
 		)
 		available_ids = self._available_attribute_ids(manifest)
 		target, target_valid, local_valid_mask = self._read_target(
@@ -221,6 +253,9 @@ class NopimsAttributePretrainDataset:
 			local_request,
 			input_ids,
 		)
+		context_compute_request: CropRequest | None = None
+		if self.use_context:
+			_, context_compute_request, _ = self._context_requests(local_request)
 
 		return {
 			'x': x,
@@ -238,11 +273,35 @@ class NopimsAttributePretrainDataset:
 				'survey_id': manifest.survey_id,
 				'local_start_xyz': local_request.start_xyz,
 				'local_size_xyz': local_request.size_xyz,
+				'local_attribute_halo_xyz': self.local_attribute_halo_xyz,
+				'local_compute_start_xyz': local_compute_request.start_xyz,
+				'local_compute_size_xyz': local_compute_request.size_xyz,
 				'context_size_xyz': (
 					self.context_crop_size_xyz if self.use_context else None
 				),
 				'context_downsample': (
 					self.context_downsample if self.use_context else None
+				),
+				'context_attribute_halo_xyz': (
+					self.context_attribute_halo_xyz if self.use_context else None
+				),
+				'context_compute_start_xyz': (
+					context_compute_request.start_xyz
+					if context_compute_request is not None
+					else None
+				),
+				'context_compute_size_xyz': (
+					context_compute_request.size_xyz
+					if context_compute_request is not None
+					else None
+				),
+				'context_lowres_compute_size_xyz': (
+					tuple(
+						size_axis // self.context_downsample
+						for size_axis in context_compute_request.size_xyz
+					)
+					if context_compute_request is not None
+					else None
 				),
 			},
 			'context': context,
@@ -313,15 +372,20 @@ class NopimsAttributePretrainDataset:
 		local_valid_mask: np.ndarray | None = None
 
 		if manifest.base_seismic is not None:
-			base_crop, local_valid_mask = self._store.read_crop_with_padding(
+			compute_request, payload_slices = expand_request_with_halo(
+				local_request,
+				self.local_attribute_halo_xyz,
+			)
+			base_crop, compute_valid_mask = self._store.read_crop_with_padding(
 				_resolve_manifest_path(manifest, manifest.base_seismic.path),
-				local_request.start_xyz,
-				local_request.size_xyz,
+				compute_request.start_xyz,
+				compute_request.size_xyz,
 			)
 			stats = self._stats_for_manifest(manifest)
-			result = generate_mvp_attributes(
+			result = generate_mvp_attributes_for_payload(
 				normalize_base_seismic(base_crop, stats),
-				valid_mask=local_valid_mask,
+				payload_slices,
+				valid_mask=compute_valid_mask,
 			)
 			return result.attributes, result.attribute_valid, result.voxel_valid_mask
 
@@ -352,16 +416,14 @@ class NopimsAttributePretrainDataset:
 		if not self.use_context:
 			return None, None
 
-		context_request = make_context_request(
+		_, context_compute_request, lowres_payload_slices = self._context_requests(
 			local_request,
-			self.context_crop_size_xyz,
-			self.context_downsample,
 		)
 		if manifest.base_seismic is not None:
 			base_crop, valid_mask = self._store.read_crop_with_padding(
 				_resolve_manifest_path(manifest, manifest.base_seismic.path),
-				context_request.start_xyz,
-				context_request.size_xyz,
+				context_compute_request.start_xyz,
+				context_compute_request.size_xyz,
 			)
 			stats = self._stats_for_manifest(manifest)
 			normalized_context, context_valid_mask = downsample_context_masked_mean(
@@ -369,8 +431,9 @@ class NopimsAttributePretrainDataset:
 				valid_mask,
 				self.context_downsample,
 			)
-			context_result = generate_mvp_attributes(
+			context_result = generate_mvp_attributes_for_payload(
 				normalized_context,
+				lowres_payload_slices,
 				valid_mask=context_valid_mask,
 			)
 			ids = np.asarray(input_ids, dtype=np.int64)
@@ -386,22 +449,82 @@ class NopimsAttributePretrainDataset:
 			record = manifest.get_attribute(name)
 			crop, valid_mask = self._store.read_crop_with_padding(
 				_resolve_manifest_path(manifest, record.path),
-				context_request.start_xyz,
-				context_request.size_xyz,
+				context_compute_request.start_xyz,
+				context_compute_request.size_xyz,
 			)
 			context_volume, attribute_valid_mask = downsample_context_masked_mean(
 				crop,
 				valid_mask,
 				self.context_downsample,
 			)
-			context_volumes.append(context_volume)
+			context_volumes.append(context_volume[lowres_payload_slices])
 			if context_valid_mask is None:
-				context_valid_mask = attribute_valid_mask
+				context_valid_mask = attribute_valid_mask[lowres_payload_slices]
 
 		return (
 			np.stack(context_volumes, axis=0).astype(np.float32, copy=False),
 			context_valid_mask,
 		)
+
+	def _context_requests(
+		self,
+		local_request: CropRequest,
+	) -> tuple[CropRequest, CropRequest, tuple[slice, slice, slice]]:
+		context_request = make_context_request(
+			local_request,
+			self.context_crop_size_xyz,
+			self.context_downsample,
+		)
+		source_halo_xyz = self._context_source_halo_xyz()
+		context_compute_request, _ = expand_request_with_halo(
+			context_request,
+			source_halo_xyz,
+		)
+		lowres_payload_slices = tuple(
+			slice(halo_axis, halo_axis + size_axis // self.context_downsample)
+			for halo_axis, size_axis in zip(
+				self.context_attribute_halo_xyz,
+				self.context_crop_size_xyz,
+				strict=True,
+			)
+		)
+		return (
+			context_request,
+			context_compute_request,
+			lowres_payload_slices,
+		)
+
+	def _sampling_margin_xyz(self) -> XYZ:
+		if not self.use_context:
+			return self.local_attribute_halo_xyz
+
+		source_halo_xyz = self._context_source_halo_xyz()
+		axes = zip(
+			self.local_attribute_halo_xyz,
+			self.local_crop_size_xyz,
+			self.context_crop_size_xyz,
+			source_halo_xyz,
+			strict=True,
+		)
+		margin_xyz = tuple(
+			max(
+				local_halo,
+				_context_payload_margin_axis(
+					local_size,
+					context_size,
+					source_halo,
+				),
+			)
+			for local_halo, local_size, context_size, source_halo in axes
+		)
+		return cast('XYZ', margin_xyz)
+
+	def _context_source_halo_xyz(self) -> XYZ:
+		source_halo_xyz = tuple(
+			halo_axis * self.context_downsample
+			for halo_axis in self.context_attribute_halo_xyz
+		)
+		return cast('XYZ', source_halo_xyz)
 
 	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:
 		if manifest.base_seismic is None:
@@ -437,7 +560,10 @@ def _validate_xyz(value: Sequence[int], name: str) -> XYZ:
 	if (
 		isinstance(value, str)
 		or len(value) != 3
-		or not all(isinstance(axis, Integral) for axis in value)
+		or not all(
+			not isinstance(axis, bool) and isinstance(axis, Integral)
+			for axis in value
+		)
 	):
 		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
 		raise TypeError(msg)
@@ -446,6 +572,31 @@ def _validate_xyz(value: Sequence[int], name: str) -> XYZ:
 		msg = f'{name} values must be positive; got {xyz!r}'
 		raise ValueError(msg)
 	return xyz
+
+
+def _validate_nonnegative_xyz(value: Sequence[int], name: str) -> XYZ:
+	if (
+		isinstance(value, str)
+		or len(value) != 3
+		or not all(
+			not isinstance(axis, bool) and isinstance(axis, Integral)
+			for axis in value
+		)
+	):
+		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
+		raise TypeError(msg)
+	xyz = tuple(int(axis) for axis in value)
+	if any(axis < 0 for axis in xyz):
+		msg = f'{name} values must be nonnegative; got {xyz!r}'
+		raise ValueError(msg)
+	return xyz
+
+
+def _validate_bool(value: object, name: str) -> bool:
+	if not isinstance(value, bool):
+		msg = f'{name} must be a bool; got {value!r}'
+		raise TypeError(msg)
+	return value
 
 
 def _validate_positive_int(value: int, name: str) -> int:
@@ -506,6 +657,25 @@ def _validate_context_geometry(
 			f'got {context_output!r} and {local_crop_size_xyz!r}'
 		)
 		raise ValueError(msg)
+
+
+def _context_payload_margin_axis(
+	local_size_axis: int,
+	context_size_axis: int,
+	source_halo_axis: int,
+) -> int:
+	lower_margin = (
+		context_size_axis // 2
+		+ source_halo_axis
+		- local_size_axis // 2
+	)
+	upper_margin = (
+		context_size_axis
+		- context_size_axis // 2
+		+ source_halo_axis
+		- (local_size_axis - local_size_axis // 2)
+	)
+	return max(0, lower_margin, upper_margin)
 
 
 __all__ = ['NopimsAttributePretrainDataset']

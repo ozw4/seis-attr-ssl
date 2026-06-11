@@ -61,6 +61,9 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'local_crop_size': [4, 4, 4],
 			'context_crop_size': [4, 4, 4],
 			'context_downsample': 1,
+			'local_attribute_halo': [0, 0, 0],
+			'context_attribute_halo': [0, 0, 0],
+			'require_full_halo_inside_volume': True,
 			'use_context': False,
 		},
 		'attributes': {

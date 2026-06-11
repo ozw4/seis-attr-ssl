@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from numbers import Integral, Real
+from operator import index
 
 import numpy as np
 
@@ -120,6 +121,51 @@ def generate_mvp_attributes(
 	)
 
 
+def center_trim_attribute_result(
+	result: AttributeGenerationResult,
+	payload_slices_xyz: tuple[slice, slice, slice],
+) -> AttributeGenerationResult:
+	"""Trim generated attributes and voxel_valid_mask to payload slices."""
+	if result.attributes.ndim != 4:
+		msg = (
+			'result.attributes must be a 4D [attribute, x, y, z] array; '
+			f'got ndim={result.attributes.ndim}'
+		)
+		raise ValueError(msg)
+	compute_shape_xyz = result.attributes.shape[1:]
+	if result.voxel_valid_mask.shape != compute_shape_xyz:
+		msg = (
+			'result.voxel_valid_mask shape must match result.attributes spatial '
+			f'shape; got {result.voxel_valid_mask.shape!r} and {compute_shape_xyz!r}'
+		)
+		raise ValueError(msg)
+	slices_xyz = _validate_payload_slices_xyz(
+		payload_slices_xyz,
+		compute_shape_xyz,
+	)
+	return AttributeGenerationResult(
+		attributes=result.attributes[(slice(None), *slices_xyz)],
+		attribute_valid=result.attribute_valid,
+		voxel_valid_mask=result.voxel_valid_mask[slices_xyz],
+	)
+
+
+def generate_mvp_attributes_for_payload(
+	amp_norm_compute: np.ndarray,
+	payload_slices_xyz: tuple[slice, slice, slice],
+	*,
+	valid_mask: np.ndarray | None = None,
+	config: AttributeGenerationConfig | None = None,
+) -> AttributeGenerationResult:
+	"""Generate MVP attributes on a compute crop and return only payload slices."""
+	result = generate_mvp_attributes(
+		amp_norm_compute,
+		valid_mask=valid_mask,
+		config=config,
+	)
+	return center_trim_attribute_result(result, payload_slices_xyz)
+
+
 def generate_mvp_attribute(
 	base_crop: np.ndarray,
 	attribute_name_or_id: str | int,
@@ -147,6 +193,63 @@ def normalize_base_seismic(
 ) -> np.ndarray:
 	"""Apply survey-wise robust normalization to a base seismic crop."""
 	return normalize_amplitude(base_crop, stats)
+
+
+def _validate_payload_slices_xyz(
+	payload_slices_xyz: tuple[slice, slice, slice],
+	compute_shape_xyz: tuple[int, int, int],
+) -> tuple[slice, slice, slice]:
+	try:
+		slices_xyz = tuple(payload_slices_xyz)
+	except TypeError as exc:
+		msg = 'payload_slices_xyz must be a sequence of three slices'
+		raise ValueError(msg) from exc
+	if len(slices_xyz) != 3:
+		msg = f'payload_slices_xyz must contain three slices; got {len(slices_xyz)}'
+		raise ValueError(msg)
+	for axis, (payload_slice, axis_size) in enumerate(
+		zip(slices_xyz, compute_shape_xyz, strict=True),
+	):
+		if type(payload_slice) is not slice:
+			msg = (
+				'payload_slices_xyz must contain only slice objects; '
+				f'axis {axis} got {type(payload_slice).__name__}'
+			)
+			raise ValueError(msg)
+		if payload_slice.start is None or payload_slice.stop is None:
+			msg = (
+				'payload_slices_xyz slices must have explicit start and stop; '
+				f'axis {axis} got {payload_slice!r}'
+			)
+			raise ValueError(msg)
+		if payload_slice.step not in (None, 1):
+			msg = (
+				'payload_slices_xyz slices must have step None or 1; '
+				f'axis {axis} got {payload_slice!r}'
+			)
+			raise ValueError(msg)
+		try:
+			start = index(payload_slice.start)
+			stop = index(payload_slice.stop)
+		except TypeError as exc:
+			msg = (
+				'payload_slices_xyz slice start and stop must be integers; '
+				f'axis {axis} got {payload_slice!r}'
+			)
+			raise ValueError(msg) from exc
+		if start < 0 or stop > axis_size:
+			msg = (
+				'payload_slices_xyz slices must be within the compute crop; '
+				f'axis {axis} got {payload_slice!r} for size {axis_size}'
+			)
+			raise ValueError(msg)
+		if stop <= start:
+			msg = (
+				'payload_slices_xyz slices must be non-empty; '
+				f'axis {axis} got {payload_slice!r}'
+			)
+			raise ValueError(msg)
+	return slices_xyz
 
 
 def _gradient_magnitude(array: np.ndarray) -> np.ndarray:
@@ -333,8 +436,10 @@ __all__ = [
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
 	'NormalizationStats',
+	'center_trim_attribute_result',
 	'generate_mvp_attribute',
 	'generate_mvp_attributes',
+	'generate_mvp_attributes_for_payload',
 	'load_normalization_stats',
 	'normalize_base_seismic',
 ]

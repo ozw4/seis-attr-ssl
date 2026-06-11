@@ -4,8 +4,59 @@ MVP attributes are generated on the fly during dataset sampling from
 survey-wise robust normalized source seismic crops. The source seismic is the
 dip-steered median filtered `.npy` memmap recorded in the base-seismic manifest.
 
-The local crop is `[128, 128, 128]`. The context crop is `[512, 512, 512]`,
-downsampled by 4 to `[128, 128, 128]` before context attributes are generated.
+The local crop is `[128, 128, 128]`. Attribute generation reads a larger
+compute crop and returns the unchanged payload crop shape:
+
+```text
+local base seismic payload: [128, 128, 128]
+local attribute halo: [16, 16, 64]
+local compute crop: [160, 160, 256]
+```
+
+Local halo-aware generation uses this order:
+
+```text
+base seismic compute crop
+  -> survey-wise robust normalization
+  -> on-the-fly MVP attribute generation
+  -> center trim to [128, 128, 128]
+  -> attribute subset sampling
+  -> spatial mask for MAE
+```
+
+The context payload crop is `[512, 512, 512]`, downsampled by 4 to
+`[128, 128, 128]`. Context attribute generation uses a halo of `[8, 8, 16]` on
+the downsampled context grid; in source-space coordinates that halo is
+multiplied by `context_downsample`:
+
+```text
+context source payload: [512, 512, 512]
+context downsample: 4
+context low-res payload: [128, 128, 128]
+context low-res halo: [8, 8, 16]
+context source halo: [32, 32, 64]
+context source compute crop: [576, 576, 640]
+context low-res compute crop: [144, 144, 160]
+```
+
+Halo-aware on-the-fly generation uses this order:
+
+```text
+base seismic compute crop + halo
+  -> survey-wise normalization
+  -> downsample context crops when building context attributes
+  -> generate attributes on compute crop
+  -> center trim to payload crop
+  -> attribute subset dropout / spatial mask
+```
+
+Spatial masking is applied only after attribute generation and center trimming.
+Attributes must not be generated from spatially masked base seismic.
+
+Training samples require full halo coverage inside the volume whenever
+possible. Small synthetic test volumes may fall back to ordinary payload crop
+sampling when the full margin cannot fit; NOPIMS production pretraining assumes
+the full local and context halo fit inside each sampled volume.
 
 Generated attributes follow the stable `seis_attr_ssl` registry order:
 

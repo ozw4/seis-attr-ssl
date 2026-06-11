@@ -35,6 +35,9 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['attribute_mode'] == 'on_the_fly'
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
+	assert cfg['data']['local_attribute_halo'] == [16, 16, 64]
+	assert cfg['data']['context_attribute_halo'] == [8, 8, 16]
+	assert cfg['data']['require_full_halo_inside_volume'] is True
 	assert len(cfg['attributes']['names']) == 10
 	assert cfg['train']['samples_per_epoch'] == 10000
 	assert cfg['train']['num_workers'] == 4
@@ -73,6 +76,9 @@ data:
   local_crop_size: [128, 128, 128]
   context_crop_size: [512, 512, 512]
   context_downsample: 4
+  local_attribute_halo: [16, 16, 64]
+  context_attribute_halo: [8, 8, 16]
+  require_full_halo_inside_volume: true
   use_context: true
 attributes:
   names:
@@ -170,6 +176,53 @@ def test_invalid_crop_downsample_combination_raises_clear_value_error() -> None:
 	cfg['data']['context_crop_size'] = [256, 512, 512]
 
 	with pytest.raises(ValueError, match='data\\.context_crop_size'):
+		validate_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('key', 'value', 'error_type'),
+	[
+		('local_attribute_halo', [16, 16], TypeError),
+		('local_attribute_halo', [16, True, 64], TypeError),
+		('local_attribute_halo', [16, -1, 64], ValueError),
+		('context_attribute_halo', [8, 8], TypeError),
+		('context_attribute_halo', [8, False, 16], TypeError),
+		('context_attribute_halo', [8, -1, 16], ValueError),
+	],
+)
+def test_invalid_attribute_halo_raises_clear_error(
+	key: str,
+	value: object,
+	error_type: type[Exception],
+) -> None:
+	cfg = _valid_config()
+	cfg['data'][key] = value
+
+	with pytest.raises(error_type, match=f'data\\.{key}'):
+		validate_config(cfg)
+
+
+def test_attribute_halo_values_are_fixed_for_mvp_mae() -> None:
+	cfg = _valid_config()
+	cfg['data']['local_attribute_halo'] = [8, 8, 8]
+
+	with pytest.raises(ValueError, match='data\\.local_attribute_halo'):
+		validate_config(cfg)
+
+
+def test_require_full_halo_inside_volume_must_be_true() -> None:
+	cfg = _valid_config()
+	cfg['data']['require_full_halo_inside_volume'] = False
+
+	with pytest.raises(ValueError, match='data\\.require_full_halo_inside_volume'):
+		validate_config(cfg)
+
+
+def test_require_full_halo_inside_volume_must_be_bool() -> None:
+	cfg = _valid_config()
+	cfg['data']['require_full_halo_inside_volume'] = 1
+
+	with pytest.raises(TypeError, match='data\\.require_full_halo_inside_volume'):
 		validate_config(cfg)
 
 

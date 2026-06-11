@@ -45,9 +45,20 @@ Production pretraining defaults are:
 local_crop_size: [128, 128, 128]
 context_crop_size: [512, 512, 512]
 context_downsample: 4
+local_attribute_halo: [16, 16, 64]
+context_attribute_halo: [8, 8, 16]
+require_full_halo_inside_volume: true
 ```
 
-Tests may use smaller crops and volumes.
+The local halo is in source-grid `[x, y, z]` coordinates. The context halo is
+defined on the downsampled context grid, so its source-space margin is
+`context_attribute_halo * context_downsample`. With the production defaults,
+context attributes are generated on a source compute crop of
+`[576, 576, 640]`, downsampled to `[144, 144, 160]`, and then center-trimmed
+to the `[128, 128, 128]` context payload. Tests may use smaller crops and
+volumes, and small synthetic volumes may fall back to ordinary crop sampling
+when the full halo margin cannot fit. NOPIMS production pretraining assumes the
+full halo fits inside the sampled volume.
 
 ## MVP Attributes
 
@@ -120,10 +131,26 @@ dropped_attribute_mask: valid targets withheld from input, bool
 target_attribute_ids: all stable MVP attribute IDs, int64
 valid_attributes: validity flags for x channels, bool
 target_valid: validity flags for target channels, bool
-coords: survey ID, local crop start and crop settings
+coords: survey ID, local payload start/size, local/context halo metadata, compute crop metadata, and crop settings
 context: selected on-the-fly context attributes after downsampling, [C, X, Y, Z], float32, or None
-context_valid_mask: downsampled context validity mask, [X, Y, Z], bool, or None
+context_valid_mask: payload-only downsampled context validity mask, [X, Y, Z], bool, or None
 local_valid_mask: local crop validity mask, [X, Y, Z], bool
+```
+
+`sample["coords"]` includes:
+
+```text
+local_start_xyz
+local_size_xyz
+local_attribute_halo_xyz
+local_compute_start_xyz
+local_compute_size_xyz
+context_size_xyz
+context_attribute_halo_xyz
+context_compute_start_xyz
+context_compute_size_xyz
+context_lowres_compute_size_xyz
+context_downsample
 ```
 
 The target attribute count `A` is the MVP registry size. Missing target

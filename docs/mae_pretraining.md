@@ -40,6 +40,10 @@ batch may include `context: [B, C, X, Y, Z]` and
 
 For the default config, local crops are `[128, 128, 128]`, patch size is
 `[8, 8, 8]`, and the token grid is `[16, 16, 16]`.
+On-the-fly targets are generated from halo-expanded compute crops and then
+center-trimmed back to the payload shape before attribute subset sampling and
+MAE spatial masking. The default local attribute halo is `[16, 16, 64]`; the
+default context halo is `[8, 8, 16]` on the low-resolution context grid.
 
 ## Dataset Sampling
 

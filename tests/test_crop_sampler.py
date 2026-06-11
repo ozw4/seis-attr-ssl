@@ -5,14 +5,17 @@ import pytest
 
 from seis_attr_ssl.data.crop_sampler import (
 	compute_centered_start,
+	expand_request_with_halo,
 	make_context_request,
 	sample_random_center,
 	sample_random_local_crop,
+	sample_random_local_crop_with_margin,
 )
 from seis_attr_ssl.data.downsample import (
 	downsample_context_masked_mean,
 	downsample_context_mean,
 )
+from seis_attr_ssl.data.schema import CropRequest
 
 LOCAL_SIZE = (128, 128, 128)
 CONTEXT_SIZE = (512, 512, 512)
@@ -96,6 +99,86 @@ def test_sample_random_local_crop_marks_padding_by_out_of_bounds_request() -> No
 	assert request.start_xyz[0] + request.size_xyz[0] >= 64
 	assert request.start_xyz[1] == 0
 	assert 0 <= request.start_xyz[2] <= 128
+
+
+def test_expand_request_with_halo_returns_compute_request_and_payload_slices() -> None:
+	request = CropRequest(
+		survey_id='survey-a',
+		start_xyz=(100, 100, 100),
+		size_xyz=LOCAL_SIZE,
+		context_size_xyz=None,
+		context_downsample=1,
+	)
+
+	compute_request, payload_slices = expand_request_with_halo(
+		request,
+		(16, 16, 64),
+	)
+
+	assert compute_request.survey_id == 'survey-a'
+	assert compute_request.start_xyz == (84, 84, 36)
+	assert compute_request.size_xyz == (160, 160, 256)
+	assert payload_slices == (
+		slice(16, 144),
+		slice(16, 144),
+		slice(64, 192),
+	)
+
+
+def test_expand_request_with_zero_halo_keeps_payload_request() -> None:
+	request = CropRequest(
+		survey_id='survey-a',
+		start_xyz=(10, 20, 30),
+		size_xyz=(32, 32, 32),
+		context_size_xyz=None,
+		context_downsample=1,
+	)
+
+	compute_request, payload_slices = expand_request_with_halo(request, (0, 0, 0))
+
+	assert compute_request == request
+	assert payload_slices == (slice(0, 32), slice(0, 32), slice(0, 32))
+
+
+def test_sample_random_local_crop_with_margin_is_in_bounds_when_possible() -> None:
+	request = sample_random_local_crop_with_margin(
+		(512, 512, 512),
+		LOCAL_SIZE,
+		(16, 16, 64),
+		np.random.default_rng(42),
+	)
+
+	assert request.size_xyz == LOCAL_SIZE
+	assert all(
+		start_axis - margin_axis >= 0
+		for start_axis, margin_axis in zip(
+			request.start_xyz,
+			(16, 16, 64),
+			strict=True,
+		)
+	)
+	assert all(
+		start_axis + size_axis + margin_axis <= shape_axis
+		for start_axis, size_axis, margin_axis, shape_axis in zip(
+			request.start_xyz,
+			request.size_xyz,
+			(16, 16, 64),
+			(512, 512, 512),
+			strict=True,
+		)
+	)
+
+
+def test_sample_random_local_crop_with_margin_falls_back_for_small_volume() -> None:
+	request = sample_random_local_crop_with_margin(
+		(64, 128, 256),
+		LOCAL_SIZE,
+		(16, 16, 64),
+		np.random.default_rng(42),
+	)
+
+	assert isinstance(request, CropRequest)
+	assert request.size_xyz == LOCAL_SIZE
 
 
 def test_local_crop_sampling_is_reproducible() -> None:

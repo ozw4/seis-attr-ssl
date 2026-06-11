@@ -3,13 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.data import (
 	AttributeGenerationResult,
 	BaseSeismicVolumeRecord,
 	SurveyManifest,
+	center_trim_attribute_result,
 	generate_mvp_attributes,
+	generate_mvp_attributes_for_payload,
 )
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 
@@ -79,12 +82,11 @@ def test_generate_mvp_attributes_zeroes_invalid_padded_voxels() -> None:
 	assert not result.attributes[:, ~valid_mask].any()
 
 
-def test_pretrain_dataset_generates_context_attributes_after_downsampling(
-	tmp_path: Path,
-	monkeypatch,
-) -> None:
-	manifest = _write_base_manifest(tmp_path / 'survey-a', (8, 8, 8))
-	calls: list[tuple[int, int, int]] = []
+def test_generate_mvp_attributes_for_payload_trims_compute_crop(monkeypatch) -> None:
+	compute_shape = (160, 160, 256)
+	payload_slices = (slice(16, 144), slice(16, 144), slice(64, 192))
+	amp = np.broadcast_to(np.zeros((1, 1, 1), dtype=np.float32), compute_shape)
+	valid_mask = np.ones(compute_shape, dtype=bool)
 
 	def fake_generate(
 		amp_norm: np.ndarray,
@@ -93,12 +95,132 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		config: object | None = None,
 	) -> AttributeGenerationResult:
 		del config
-		calls.append(amp_norm.shape)
-		assert amp_norm.shape == (4, 4, 4)
-		mask = np.ones(amp_norm.shape, dtype=bool) if valid_mask is None else valid_mask
+		assert amp_norm.shape == compute_shape
+		assert valid_mask is not None
+		attributes = np.broadcast_to(
+			np.arange(10, dtype=np.float32).reshape(10, 1, 1, 1),
+			(10, *compute_shape),
+		)
+		return AttributeGenerationResult(
+			attributes=attributes,
+			attribute_valid=np.ones(10, dtype=bool),
+			voxel_valid_mask=valid_mask,
+		)
+
+	monkeypatch.setattr(
+		'seis_attr_ssl.attributes.on_the_fly.generate_mvp_attributes',
+		fake_generate,
+	)
+
+	result = generate_mvp_attributes_for_payload(
+		amp,
+		payload_slices,
+		valid_mask=valid_mask,
+	)
+
+	assert result.attributes.shape == (10, 128, 128, 128)
+	assert result.attributes.dtype == np.float32
+	assert result.voxel_valid_mask.shape == (128, 128, 128)
+	assert result.voxel_valid_mask.dtype == np.bool_
+	np.testing.assert_array_equal(result.attributes[:, 0, 0, 0], np.arange(10))
+
+
+def test_generate_mvp_attributes_for_payload_trims_valid_mask() -> None:
+	amp = np.arange(6 * 6 * 8, dtype=np.float32).reshape(6, 6, 8)
+	valid_mask = np.ones_like(amp, dtype=bool)
+	valid_mask[0] = False
+	valid_mask[2, 4, 5] = False
+	payload_slices = (slice(1, 5), slice(2, 6), slice(3, 7))
+
+	result = generate_mvp_attributes_for_payload(
+		amp,
+		payload_slices,
+		valid_mask=valid_mask,
+	)
+
+	assert result.attributes.shape == (10, 4, 4, 4)
+	assert result.voxel_valid_mask.shape == (4, 4, 4)
+	assert not result.voxel_valid_mask[1, 2, 2]
+	assert not result.attributes[:, 1, 2, 2].any()
+	np.testing.assert_array_equal(
+		result.voxel_valid_mask,
+		valid_mask[payload_slices],
+	)
+
+
+@pytest.mark.parametrize(
+	'payload_slices',
+	[
+		(slice(0, 2), slice(0, 2)),
+		(slice(None, 2), slice(0, 2), slice(0, 2)),
+		(slice(0, None), slice(0, 2), slice(0, 2)),
+		(slice(-1, 2), slice(0, 2), slice(0, 2)),
+		(slice(0, 5), slice(0, 2), slice(0, 2)),
+		(slice(1, 1), slice(0, 2), slice(0, 2)),
+		(slice(0, 2, 2), slice(0, 2), slice(0, 2)),
+		(0, slice(0, 2), slice(0, 2)),
+	],
+)
+def test_center_trim_attribute_result_rejects_invalid_slices(
+	payload_slices: tuple[slice, ...],
+) -> None:
+	result = AttributeGenerationResult(
+		attributes=np.ones((10, 4, 4, 4), dtype=np.float32),
+		attribute_valid=np.ones(10, dtype=bool),
+		voxel_valid_mask=np.ones((4, 4, 4), dtype=bool),
+	)
+
+	with pytest.raises(ValueError, match='payload_slices_xyz'):
+		center_trim_attribute_result(result, payload_slices)
+
+
+def test_pretrain_dataset_generates_context_attributes_after_downsampling(
+	tmp_path: Path,
+	monkeypatch,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', (8, 8, 8))
+	target_calls: list[
+		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
+	] = []
+	context_calls: list[
+		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
+	] = []
+
+	def fake_generate_for_payload(
+		amp_norm: np.ndarray,
+		payload_slices_xyz: tuple[slice, slice, slice],
+		*,
+		valid_mask: np.ndarray | None = None,
+		config: object | None = None,
+	) -> AttributeGenerationResult:
+		del config
+		if amp_norm.shape == (36, 36, 132):
+			target_calls.append((amp_norm.shape, payload_slices_xyz))
+			assert payload_slices_xyz == (
+				slice(16, 20),
+				slice(16, 20),
+				slice(64, 68),
+			)
+		else:
+			context_calls.append((amp_norm.shape, payload_slices_xyz))
+			assert amp_norm.shape == (20, 20, 36)
+			assert payload_slices_xyz == (
+				slice(8, 12),
+				slice(8, 12),
+				slice(16, 20),
+			)
+		payload_shape = tuple(
+			payload_slice.stop - payload_slice.start
+			for payload_slice in payload_slices_xyz
+		)
+		mask = (
+			np.ones(payload_shape, dtype=bool)
+			if valid_mask is None
+			else valid_mask[payload_slices_xyz]
+		)
 		attributes = np.stack(
 			[
-				np.full(amp_norm.shape, spec.id, dtype=np.float32)
+				np.full(payload_shape, spec.id, dtype=np.float32)
 				for spec in MVP_ATTRIBUTE_REGISTRY.specs
 			],
 			axis=0,
@@ -110,8 +232,8 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		)
 
 	monkeypatch.setattr(
-		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes',
-		fake_generate,
+		'seis_attr_ssl.data.pretrain_dataset.generate_mvp_attributes_for_payload',
+		fake_generate_for_payload,
 	)
 	dataset = NopimsAttributePretrainDataset(
 		[manifest],
@@ -126,8 +248,62 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 
 	sample = dataset[0]
 
-	assert calls == [(4, 4, 4), (4, 4, 4)]
+	assert target_calls == [
+		(
+			(36, 36, 132),
+			(slice(16, 20), slice(16, 20), slice(64, 68)),
+		),
+	]
+	assert context_calls == [
+		(
+			(20, 20, 36),
+			(slice(8, 12), slice(8, 12), slice(16, 20)),
+		),
+	]
 	assert sample['context'].shape == (2, 4, 4, 4)
+
+
+def test_pretrain_dataset_spatial_mask_does_not_change_generated_target(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', (10, 10, 10))
+	unmasked = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		use_context=False,
+		patch_size_xyz=(2, 2, 2),
+		spatial_mask_ratio=0.0,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=123,
+	)
+	masked = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		use_context=False,
+		patch_size_xyz=(2, 2, 2),
+		spatial_mask_ratio=0.75,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=123,
+	)
+
+	unmasked_sample = unmasked[0]
+	masked_sample = masked[0]
+
+	assert unmasked_sample['coords'] == masked_sample['coords']
+	np.testing.assert_array_equal(
+		unmasked_sample['target'],
+		masked_sample['target'],
+	)
+	assert not np.array_equal(
+		unmasked_sample['spatial_mask'],
+		masked_sample['spatial_mask'],
+	)
 
 
 def _write_base_manifest(
