@@ -90,6 +90,37 @@ def test_train_mae_proc_missing_manifest_explains_how_to_build(
 	assert 'proc/build_nopims_manifests.py' in result.stderr
 
 
+def test_train_mae_proc_missing_manifest_train_key_explains_how_to_build(
+	tmp_path: Path,
+) -> None:
+	config = _synthetic_config(tmp_path, tmp_path / 'manifest.json')
+	config['manifests'] = {}
+	config_path = tmp_path / 'mae.yaml'
+	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			str(PROJECT_ROOT / 'proc/train_mae.py'),
+			'--config',
+			str(config_path),
+			'--device',
+			'cpu',
+			'--max-steps',
+			'1',
+		],
+		check=False,
+		capture_output=True,
+		text=True,
+		cwd=PROJECT_ROOT,
+		timeout=30,
+	)
+
+	assert result.returncode != 0
+	assert 'manifests.train is required' in result.stderr
+	assert 'proc/build_nopims_manifests.py' in result.stderr
+
+
 def _write_synthetic_manifest(root: Path) -> Path:
 	records: dict[str, AttributeVolumeRecord] = {}
 	shape_xyz = (128, 128, 128)

@@ -20,6 +20,12 @@ from seis_attr_ssl.training.collate import move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
 from seis_attr_ssl.training.logging import print_epoch_metrics
 
+_MANIFEST_BUILD_HINT = (
+	'Build NOPIMS manifests with '
+	'`python proc/build_nopims_manifests.py --config '
+	'proc/configs/build_nopims_manifests.yaml`.'
+)
+
 
 @dataclass(frozen=True)
 class MaeTrainingState:
@@ -220,17 +226,28 @@ def _build_model(
 
 
 def _manifest_train_path(config: Mapping[str, object]) -> Path:
-	manifests = _mapping(config, 'manifests')
-	path = Path(_str_config(manifests, 'train'))
-	if not path.is_file():
-		msg = (
-			f'manifests.train does not exist: {path}. '
-			'Build NOPIMS manifests with '
-			'`python proc/build_nopims_manifests.py --config '
-			'proc/configs/build_nopims_manifests.yaml`.'
+	manifests = config.get('manifests')
+	if not isinstance(manifests, Mapping):
+		msg = _manifest_path_error('manifests.train is required')
+		raise TypeError(msg)
+	if 'train' not in manifests:
+		msg = _manifest_path_error('manifests.train is required')
+		raise ValueError(msg)
+	path_value = manifests.get('train')
+	if not isinstance(path_value, str) or not path_value:
+		msg = _manifest_path_error(
+			f'manifests.train must be a non-empty string; got {path_value!r}',
 		)
+		raise ValueError(msg)
+	path = Path(path_value)
+	if not path.is_file():
+		msg = _manifest_path_error(f'manifests.train does not exist: {path}')
 		raise FileNotFoundError(msg)
 	return path
+
+
+def _manifest_path_error(reason: str) -> str:
+	return f'{reason}. {_MANIFEST_BUILD_HINT}'
 
 
 def _resolve_device(train_config: Mapping[str, object]) -> torch.device:

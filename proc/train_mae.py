@@ -48,13 +48,14 @@ def main() -> None:
 	)
 	args = parser.parse_args()
 
-	config = validate_config(load_config(args.config))
+	config = load_config(args.config)
 	_apply_cli_overrides(
 		config,
 		device=args.device,
 		max_steps=args.max_steps,
 		output_root=args.output_root,
 	)
+	config = validate_config(config)
 	if args.dry_run:
 		print_config_summary(config)
 		return
@@ -70,8 +71,10 @@ def _apply_cli_overrides(
 	max_steps: int | None,
 	output_root: Path | None,
 ) -> None:
-	train = _section(config, 'train')
-	paths = _section(config, 'paths')
+	if device is not None or max_steps is not None:
+		train = _section(config, 'train')
+	if output_root is not None:
+		paths = _section(config, 'paths')
 	if device is not None:
 		train['device'] = device
 	if max_steps is not None:

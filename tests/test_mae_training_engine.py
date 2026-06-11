@@ -156,6 +156,20 @@ def test_config_with_f3_path_or_key_is_rejected_for_pretraining(tmp_path: Path) 
 		run_mae_pretraining(cfg)
 
 
+def test_missing_manifest_train_path_explains_how_to_build(tmp_path: Path) -> None:
+	cfg = deepcopy(_tiny_config(tmp_path))
+	cfg.pop('manifests')
+
+	with pytest.raises(TypeError, match=r'proc/build_nopims_manifests\.py'):
+		run_mae_pretraining(cfg)
+
+	cfg = deepcopy(_tiny_config(tmp_path))
+	cfg['manifests'] = {}
+
+	with pytest.raises(ValueError, match=r'manifests\.train is required'):
+		run_mae_pretraining(cfg)
+
+
 def test_amp_flag_on_cpu_does_not_enable_cuda_amp(tmp_path: Path) -> None:
 	cfg = deepcopy(_tiny_config(tmp_path))
 	cfg['train']['amp'] = True

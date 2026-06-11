@@ -62,6 +62,9 @@ def validate_config(config: _T) -> _T:
 	paths = _required_mapping(config, 'paths')
 	_validate_nopims_root(paths)
 
+	if 'train' in config:
+		_validate_train(_required_mapping(config, 'train'))
+
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
 
@@ -176,6 +179,11 @@ def _validate_masking(masking: Mapping[str, object]) -> None:
 	_validate_probability(masking, 'group_dropout_prob')
 
 
+def _validate_train(train: Mapping[str, object]) -> None:
+	if 'max_steps' in train:
+		_validate_positive_int(train, 'max_steps', prefix='train')
+
+
 def _validate_probability(parent: Mapping[str, object], key: str) -> float:
 	value = parent.get(key)
 	if isinstance(value, bool) or not isinstance(value, Real):
@@ -188,14 +196,19 @@ def _validate_probability(parent: Mapping[str, object], key: str) -> float:
 	return probability
 
 
-def _validate_positive_int(parent: Mapping[str, object], key: str) -> int:
+def _validate_positive_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str = 'masking',
+) -> int:
 	value = parent.get(key)
 	if isinstance(value, bool) or not isinstance(value, Integral):
-		msg = f'masking.{key} must be an integer; got {value!r}'
+		msg = f'{prefix}.{key} must be an integer; got {value!r}'
 		raise TypeError(msg)
 	count = int(value)
 	if count <= 0:
-		msg = f'masking.{key} must be positive; got {count!r}'
+		msg = f'{prefix}.{key} must be positive; got {count!r}'
 		raise ValueError(msg)
 	return count
 
