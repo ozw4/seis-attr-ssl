@@ -35,6 +35,9 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['data']['grid_order'] == ['x', 'y', 'z']
 	assert cfg['data']['attribute_mode'] == 'on_the_fly'
 	assert cfg['data']['local_crop_size'] == [128, 128, 128]
+	assert cfg['data']['local_attribute_halo'] == [16, 16, 64]
+	assert cfg['data']['context_attribute_halo'] == [8, 8, 16]
+	assert cfg['data']['require_full_halo_inside_volume'] is True
 	assert len(cfg['attributes']['names']) == 10
 	assert cfg['train']['samples_per_epoch'] == 10000
 	assert cfg['train']['num_workers'] == 4

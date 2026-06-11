@@ -131,10 +131,25 @@ dropped_attribute_mask: valid targets withheld from input, bool
 target_attribute_ids: all stable MVP attribute IDs, int64
 valid_attributes: validity flags for x channels, bool
 target_valid: validity flags for target channels, bool
-coords: survey ID, local payload start/size, local halo, compute start/size, and crop settings
+coords: survey ID, local payload start/size, local/context halo metadata, compute crop metadata, and crop settings
 context: selected on-the-fly context attributes after downsampling, [C, X, Y, Z], float32, or None
 context_valid_mask: payload-only downsampled context validity mask, [X, Y, Z], bool, or None
 local_valid_mask: local crop validity mask, [X, Y, Z], bool
+```
+
+`sample["coords"]` includes:
+
+```text
+local_start_xyz
+local_size_xyz
+local_attribute_halo_xyz
+local_compute_start_xyz
+local_compute_size_xyz
+context_size_xyz
+context_attribute_halo_xyz
+context_compute_start_xyz
+context_compute_size_xyz
+context_downsample
 ```
 
 The target attribute count `A` is the MVP registry size. Missing target

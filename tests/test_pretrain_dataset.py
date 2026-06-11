@@ -371,6 +371,89 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.seed == 42
 
 
+def test_pretrain_dataset_mvp_halo_sample_contract(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(1024, 1024, 1024),
+	)
+
+	def fake_read_target(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+	) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		target = np.broadcast_to(
+			np.arange(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=np.float32).reshape(
+				-1,
+				1,
+				1,
+				1,
+			),
+			(len(MVP_ATTRIBUTE_REGISTRY.specs), 128, 128, 128),
+		)
+		return (
+			target,
+			np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+			np.ones((128, 128, 128), dtype=bool),
+		)
+
+	def fake_read_context(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+		input_ids: tuple[int, ...],
+	) -> tuple[np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		context = np.broadcast_to(
+			np.asarray(input_ids, dtype=np.float32).reshape(-1, 1, 1, 1),
+			(len(input_ids), 128, 128, 128),
+		)
+		return context, np.ones((128, 128, 128), dtype=bool)
+
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_target',
+		fake_read_target,
+	)
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_context',
+		fake_read_context,
+	)
+	dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(128, 128, 128),
+		local_attribute_halo_xyz=(16, 16, 64),
+		require_full_halo_inside_volume=True,
+		context_crop_size_xyz=(512, 512, 512),
+		context_downsample=4,
+		context_attribute_halo_xyz=(8, 8, 16),
+		patch_size_xyz=(8, 8, 8),
+		min_input_attributes=4,
+		max_input_attributes=4,
+		seed=7,
+	)
+
+	sample = dataset[0]
+	coords = sample['coords']
+
+	assert sample['target'].shape == (10, 128, 128, 128)
+	assert sample['local_valid_mask'].shape == (128, 128, 128)
+	assert coords['local_compute_size_xyz'] == (160, 160, 256)
+	assert coords['local_attribute_halo_xyz'] == (16, 16, 64)
+	assert sample['context'].shape == (4, 128, 128, 128)
+	assert sample['context_valid_mask'].shape == (128, 128, 128)
+	assert coords['context_compute_size_xyz'] == (576, 576, 640)
+	assert coords['context_lowres_compute_size_xyz'] == (144, 144, 160)
+	assert coords['context_attribute_halo_xyz'] == (8, 8, 16)
+	assert coords['context_downsample'] == 4
+
+
 def test_pretrain_dataset_context_compute_request_uses_lowres_halo(
 	tmp_path: Path,
 ) -> None:

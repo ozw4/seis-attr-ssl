@@ -263,6 +263,49 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	assert sample['context'].shape == (2, 4, 4, 4)
 
 
+def test_pretrain_dataset_spatial_mask_does_not_change_generated_target(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', (10, 10, 10))
+	unmasked = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		use_context=False,
+		patch_size_xyz=(2, 2, 2),
+		spatial_mask_ratio=0.0,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=123,
+	)
+	masked = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 8),
+		context_downsample=2,
+		use_context=False,
+		patch_size_xyz=(2, 2, 2),
+		spatial_mask_ratio=0.75,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=123,
+	)
+
+	unmasked_sample = unmasked[0]
+	masked_sample = masked[0]
+
+	assert unmasked_sample['coords'] == masked_sample['coords']
+	np.testing.assert_array_equal(
+		unmasked_sample['target'],
+		masked_sample['target'],
+	)
+	assert not np.array_equal(
+		unmasked_sample['spatial_mask'],
+		masked_sample['spatial_mask'],
+	)
+
+
 def _write_base_manifest(
 	root: Path,
 	shape_xyz: tuple[int, int, int],
