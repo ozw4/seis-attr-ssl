@@ -11,7 +11,6 @@ from seis_attr_ssl.data.crop_sampler import (
 )
 from seis_attr_ssl.data.downsample import downsample_context_mean
 
-
 LOCAL_SIZE = (128, 128, 128)
 CONTEXT_SIZE = (512, 512, 512)
 

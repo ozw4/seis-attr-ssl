@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from numbers import Integral
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-import numpy as np
+if TYPE_CHECKING:
+	from collections.abc import Sequence
+
+	import numpy as np
 
 from seis_attr_ssl.data.schema import CropRequest
-
 
 XYZ = tuple[int, int, int]
 

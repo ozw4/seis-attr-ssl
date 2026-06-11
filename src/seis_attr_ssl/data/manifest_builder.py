@@ -53,6 +53,7 @@ def build_nopims_manifests(
 	output_path: Path,
 	scan_pattern: str,
 	registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
+	*,
 	require_all_attributes: bool = False,
 ) -> list[SurveyManifest]:
 	"""Scan NOPIMS `.npy` attribute volumes and write a JSON manifest."""
@@ -71,6 +72,7 @@ def scan_nopims_manifests(
 	nopims_root: Path,
 	scan_pattern: str,
 	registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
+	*,
 	require_all_attributes: bool = False,
 ) -> ManifestBuildResult:
 	"""Scan NOPIMS `.npy` attribute volumes without writing JSON."""
@@ -158,7 +160,11 @@ def summarize_manifests(
 
 def _iter_npy_paths(root: Path, scan_pattern: str) -> list[Path]:
 	return sorted(
-		(path for path in root.glob(scan_pattern) if path.is_file() and path.suffix == '.npy'),
+		(
+			path
+			for path in root.glob(scan_pattern)
+			if path.is_file() and path.suffix == '.npy'
+		),
 		key=lambda path: path.relative_to(root).as_posix(),
 	)
 
@@ -181,6 +187,7 @@ def _build_survey_manifest(
 	survey_root: Path,
 	records: dict[str, AttributeVolumeRecord],
 	registry: AttributeRegistry,
+	*,
 	require_all_attributes: bool,
 ) -> SurveyManifest:
 	if not records:
