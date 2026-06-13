@@ -29,8 +29,10 @@ if TYPE_CHECKING:
 		ManifestBuildResult,
 		ManifestBuildSummary,
 		build_nopims_base_seismic_manifests,
+		build_nopims_base_seismic_manifests_from_path_list,
 		build_nopims_manifests,
 		scan_nopims_base_seismic_manifests,
+		scan_nopims_base_seismic_manifests_from_path_list,
 		scan_nopims_manifests,
 		summarize_manifests,
 	)
@@ -40,6 +42,11 @@ if TYPE_CHECKING:
 		load_normalization_stats,
 		normalize_amplitude,
 		write_normalization_stats,
+	)
+	from seis_attr_ssl.data.path_list import (
+		load_npy_path_list,
+		make_survey_id_from_path,
+		resolve_npy_path_list,
 	)
 	from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 	from seis_attr_ssl.data.schema import (
@@ -82,6 +89,7 @@ __all__ = [
 	'TensorLike',
 	'UnlabeledPretrainingSample',
 	'build_nopims_base_seismic_manifests',
+	'build_nopims_base_seismic_manifests_from_path_list',
 	'build_nopims_manifests',
 	'center_trim_attribute_result',
 	'compute_centered_start',
@@ -91,13 +99,17 @@ __all__ = [
 	'generate_mvp_attributes_for_payload',
 	'inspect_npy_volume',
 	'load_normalization_stats',
+	'load_npy_path_list',
 	'make_context_request',
+	'make_survey_id_from_path',
 	'normalize_amplitude',
 	'read_manifest_json',
+	'resolve_npy_path_list',
 	'sample_attribute_subset',
 	'sample_random_center',
 	'sample_random_local_crop',
 	'scan_nopims_base_seismic_manifests',
+	'scan_nopims_base_seismic_manifests_from_path_list',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 	'survey_manifest_from_dict',
@@ -110,8 +122,10 @@ _MANIFEST_BUILDER_EXPORTS = {
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'build_nopims_base_seismic_manifests',
+	'build_nopims_base_seismic_manifests_from_path_list',
 	'build_nopims_manifests',
 	'scan_nopims_base_seismic_manifests',
+	'scan_nopims_base_seismic_manifests_from_path_list',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 }
@@ -153,6 +167,12 @@ _NORMALIZATION_EXPORTS = {
 	'write_normalization_stats',
 }
 
+_PATH_LIST_EXPORTS = {
+	'load_npy_path_list',
+	'make_survey_id_from_path',
+	'resolve_npy_path_list',
+}
+
 _SCHEMA_EXPORTS = {
 	'GRID_ORDER_XYZ',
 	'AttributeVolumeRecord',
@@ -184,6 +204,7 @@ _EXPORT_MODULES = {
 	**dict.fromkeys(_ATTRIBUTE_SUBSET_EXPORTS, 'seis_attr_ssl.data.attribute_subset'),
 	**dict.fromkeys(_DOWNSAMPLE_EXPORTS, 'seis_attr_ssl.data.downsample'),
 	**dict.fromkeys(_NORMALIZATION_EXPORTS, 'seis_attr_ssl.data.normalization'),
+	**dict.fromkeys(_PATH_LIST_EXPORTS, 'seis_attr_ssl.data.path_list'),
 	**dict.fromkeys(_PRETRAIN_DATASET_EXPORTS, 'seis_attr_ssl.data.pretrain_dataset'),
 	**dict.fromkeys(_SCHEMA_EXPORTS, 'seis_attr_ssl.data.schema'),
 	**dict.fromkeys(_VOLUME_STORE_EXPORTS, 'seis_attr_ssl.data.volume_store'),

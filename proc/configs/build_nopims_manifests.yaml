@@ -53,11 +53,7 @@ normalization:
 stage: build_nopims_manifests
 
 manifest:
+  input_path_list: /home/dcuser/data/NOPIMS/train_npy_paths.txt
   output_dir: /home/dcuser/data/NOPIMS/manifests/
-  scan_pattern: "**/*.npy"
-  require_base_seismic: true
-  normalization_stats_name: normalization_stats.json
-  base_seismic_name_hints:
-    - dip
-    - median
-    - filtered
+  output_name: nopims_base_seismic_manifests.json
+  normalization_stats_suffix: .normalization_stats.json
