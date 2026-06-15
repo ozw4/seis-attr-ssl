@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config import load_config
@@ -15,6 +16,8 @@ from seis_attr_ssl.data import (
 )
 from seis_attr_ssl.data.attribute_subset import sample_attribute_subset
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
+from seis_attr_ssl.models.mae import StrictAttributeSetMAE3D
+from seis_attr_ssl.training.collate import mae_collate_fn
 
 LOCAL_SIZE = (4, 4, 4)
 CONTEXT_SIZE = (8, 8, 8)
@@ -617,6 +620,49 @@ def test_pretrain_dataset_axis_wise_context_downsample_sample_contract(
 			dtype=np.float32,
 		),
 	)
+
+
+def test_axis_wise_context_downsample_collates_and_runs_model(
+	tmp_path: Path,
+) -> None:
+	names = MVP_ATTRIBUTE_REGISTRY.names[:2]
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		names,
+		shape_xyz=(8, 8, 12),
+		fill_value=5.0,
+	)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 12),
+		context_downsample=(2, 2, 3),
+		context_attribute_halo_xyz=(0, 0, 0),
+		patch_size_xyz=(4, 4, 4),
+		spatial_mask_ratio=0.0,
+		min_input_attributes=2,
+		max_input_attributes=2,
+	)
+	batch = mae_collate_fn([dataset[0]])
+	model = StrictAttributeSetMAE3D(
+		num_attributes=len(MVP_ATTRIBUTE_REGISTRY.specs),
+		attribute_groups=MVP_ATTRIBUTE_REGISTRY.groups,
+		patch_size_xyz=(4, 4, 4),
+		encoder_dim=16,
+		encoder_depth=1,
+		encoder_heads=4,
+		decoder_dim=16,
+		decoder_depth=1,
+		decoder_heads=4,
+		num_context_tokens=1,
+		use_context=True,
+	)
+
+	with torch.no_grad():
+		output = model(batch)
+
+	assert batch['context'].shape == batch['x'].shape
+	assert output['pred_patches'].shape == (1, 1, len(MVP_ATTRIBUTE_REGISTRY.specs), 64)
 
 
 def test_pretrain_dataset_full_halo_sampling_reserves_context_margin(

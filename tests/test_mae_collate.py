@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
+from seis_attr_ssl.models.mae import StrictAttributeSetMAE3D
 from seis_attr_ssl.training import build_mae_dataloader
 from seis_attr_ssl.training.collate import mae_collate_fn, move_batch_to_device
 
@@ -92,8 +93,31 @@ def test_context_absence_is_handled_when_use_context_false() -> None:
 		],
 	)
 
-	assert 'context' not in batch
-	assert 'context_valid_mask' not in batch
+	assert batch['context'] is None
+	assert batch['context_valid_mask'] is None
+
+
+def test_collated_none_context_batch_runs_through_model() -> None:
+	batch = mae_collate_fn([_sample((0, 1), use_context=False)])
+	batch['spatial_mask'] = torch.zeros((1, 1, 1, 1), dtype=torch.bool)
+	batch['visible_spatial_mask'] = ~batch['spatial_mask']
+	model = StrictAttributeSetMAE3D(
+		num_attributes=4,
+		attribute_groups=None,
+		patch_size_xyz=(2, 2, 2),
+		encoder_dim=16,
+		encoder_depth=1,
+		encoder_heads=4,
+		decoder_dim=16,
+		decoder_depth=1,
+		decoder_heads=4,
+		num_context_tokens=1,
+		use_context=False,
+	)
+
+	out = model(batch)
+
+	assert out['pred_patches'].shape == (1, 1, 4, 8)
 
 
 def test_collated_dtypes_are_correct() -> None:

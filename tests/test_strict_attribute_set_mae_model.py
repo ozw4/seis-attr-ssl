@@ -102,6 +102,18 @@ def test_forward_pass_without_context() -> None:
 	assert out['token_grid_shape'] == (4, 4, 4)
 
 
+def test_forward_pass_with_explicit_none_context() -> None:
+	model = _make_model(use_context=True)
+	batch = _make_batch()
+	batch['context'] = None
+	batch['context_valid_mask'] = None
+
+	out = model(batch)
+
+	assert out['pred_patches'].shape == (2, 64, 10, 64)
+	assert out['decoder_tokens'].shape == (2, 64, 16)
+
+
 def test_forward_pass_with_context() -> None:
 	model = _make_model(use_context=True)
 	out = model(_make_batch(use_context=True))
@@ -109,6 +121,33 @@ def test_forward_pass_with_context() -> None:
 	assert out['pred_patches'].shape == (2, 64, 10, 64)
 	assert out['encoded_tokens'].shape == (2, 62, 32)
 	assert out['decoder_tokens'].shape == (2, 64, 16)
+
+
+def test_forward_pass_with_context_matching_variable_local_shape() -> None:
+	model = _make_model(use_context=True)
+	batch = _make_batch(batch_size=1, channels=2, use_context=True)
+	batch['x'] = torch.randn((1, 2, 8, 8, 16))
+	batch['context'] = torch.randn_like(batch['x'])
+	batch['attribute_ids'] = torch.tensor([[0, 1]])
+	batch['spatial_mask'] = torch.zeros((1, 2, 2, 4), dtype=torch.bool)
+	batch['spatial_mask'][:, 0, 0, 0] = True
+	batch['visible_spatial_mask'] = ~batch['spatial_mask']
+	batch['context_valid_mask'] = torch.ones((1, 8, 8, 16), dtype=torch.bool)
+
+	out = model(batch)
+
+	assert out['pred_patches'].shape == (1, 16, 10, 64)
+	assert out['token_grid_shape'] == (2, 2, 4)
+
+
+def test_context_shape_mismatch_raises_clear_value_error() -> None:
+	model = _make_model(use_context=True)
+	batch = _make_batch(batch_size=1, use_context=True)
+	batch['context'] = torch.randn((1, 3, 8, 16, 16))
+	batch['context_valid_mask'] = torch.ones((1, 8, 16, 16), dtype=torch.bool)
+
+	with pytest.raises(ValueError, match='context payload shape must match local x'):
+		model(batch)
 
 
 def test_fully_valid_context_mask_keeps_all_context_tokens_valid(

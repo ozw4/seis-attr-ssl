@@ -47,6 +47,9 @@ def mae_collate_fn(
 		context_arrays = [_as_array(value, 'context') for value in context_values]
 		batch['context'] = _collate_padded_channels(context_arrays, cmax)
 		batch['context_valid_mask'] = _stack_arrays(samples, 'context_valid_mask')
+	else:
+		batch['context'] = None
+		batch['context_valid_mask'] = None
 
 	return batch
 
