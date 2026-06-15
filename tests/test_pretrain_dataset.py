@@ -130,6 +130,7 @@ def _dataset(
 		'local_crop_size_xyz': LOCAL_SIZE,
 		'context_crop_size_xyz': CONTEXT_SIZE,
 		'context_downsample': CONTEXT_DOWNSAMPLE,
+		'require_full_halo_inside_volume': False,
 		'patch_size_xyz': LOCAL_SIZE,
 		'min_input_attributes': 2,
 		'max_input_attributes': 4,
@@ -348,7 +349,7 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	manifest = _manifest_metadata(
 		tmp_path / 'survey-a',
 		MVP_ATTRIBUTE_REGISTRY.names,
-		shape_xyz=(128, 128, 128),
+		shape_xyz=(300, 300, 1501),
 	)
 
 	dataset = NopimsAttributePretrainDataset.from_config([manifest], cfg)
@@ -369,6 +370,132 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.attribute_dropout_prob == 0.30
 	assert dataset.group_dropout_prob == 0.20
 	assert dataset.seed == 42
+
+
+def test_pretrain_dataset_accepts_nopims_full_halo_geometry(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(300, 300, 1501),
+	)
+
+	def fake_read_target(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+	) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		return (
+			np.zeros(
+				(len(MVP_ATTRIBUTE_REGISTRY.specs), 128, 128, 128),
+				dtype=np.float32,
+			),
+			np.ones(len(MVP_ATTRIBUTE_REGISTRY.specs), dtype=bool),
+			np.ones((128, 128, 128), dtype=bool),
+		)
+
+	def fake_read_context(
+		self: NopimsAttributePretrainDataset,
+		manifest: SurveyManifest,
+		local_request: CropRequest,
+		input_ids: tuple[int, ...],
+	) -> tuple[np.ndarray, np.ndarray]:
+		del self, manifest, local_request
+		return (
+			np.zeros((len(input_ids), 128, 128, 128), dtype=np.float32),
+			np.ones((128, 128, 128), dtype=bool),
+		)
+
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_target',
+		fake_read_target,
+	)
+	monkeypatch.setattr(
+		NopimsAttributePretrainDataset,
+		'_read_context',
+		fake_read_context,
+	)
+	dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(128, 128, 128),
+		local_attribute_halo_xyz=(16, 16, 64),
+		require_full_halo_inside_volume=True,
+		context_crop_size_xyz=(256, 256, 512),
+		context_downsample=(2, 2, 4),
+		context_attribute_halo_xyz=(8, 8, 16),
+		patch_size_xyz=(8, 8, 8),
+		min_input_attributes=4,
+		max_input_attributes=4,
+		seed=7,
+	)
+
+	sample = dataset[0]
+	coords = sample['coords']
+
+	assert dataset.local_compute_size_xyz == (160, 160, 256)
+	assert dataset.context_compute_size_xyz == (288, 288, 640)
+	assert dataset.required_full_halo_size_xyz == (288, 288, 640)
+	assert coords['local_compute_size_xyz'] == (160, 160, 256)
+	assert coords['context_compute_size_xyz'] == (288, 288, 640)
+	assert bool(sample['local_valid_mask'].all())
+	assert bool(sample['context_valid_mask'].all())
+
+
+def test_pretrain_dataset_rejects_volume_smaller_than_context_full_halo(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(287, 300, 1501),
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=(
+			r"survey 'survey-a' shape \[287, 300, 1501\] is smaller than "
+			r"required full-halo size \[288, 288, 640\]"
+		),
+	):
+		NopimsAttributePretrainDataset(
+			[manifest],
+			local_crop_size_xyz=(128, 128, 128),
+			local_attribute_halo_xyz=(16, 16, 64),
+			require_full_halo_inside_volume=True,
+			context_crop_size_xyz=(256, 256, 512),
+			context_downsample=(2, 2, 4),
+			context_attribute_halo_xyz=(8, 8, 16),
+			patch_size_xyz=(8, 8, 8),
+			min_input_attributes=4,
+			max_input_attributes=4,
+		)
+
+
+def test_pretrain_dataset_full_halo_without_context_uses_local_required_size(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(160, 160, 256),
+	)
+
+	dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(128, 128, 128),
+		local_attribute_halo_xyz=(16, 16, 64),
+		require_full_halo_inside_volume=True,
+		use_context=False,
+		patch_size_xyz=(8, 8, 8),
+		min_input_attributes=4,
+		max_input_attributes=4,
+	)
+
+	assert dataset.required_full_halo_size_xyz == (160, 160, 256)
 
 
 def test_pretrain_dataset_mvp_halo_sample_contract(

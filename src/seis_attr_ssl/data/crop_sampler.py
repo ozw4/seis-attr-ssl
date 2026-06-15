@@ -26,6 +26,96 @@ def compute_centered_start(center_xyz: Sequence[int], size_xyz: Sequence[int]) -
 	)
 
 
+def compute_local_compute_size_xyz(
+	local_crop_size_xyz: Sequence[int],
+	local_attribute_halo_xyz: Sequence[int],
+) -> XYZ:
+	"""Return source crop size needed to compute local payload attributes."""
+	local_crop_size = _validate_positive_xyz(
+		local_crop_size_xyz,
+		'local_crop_size_xyz',
+	)
+	local_attribute_halo = _validate_nonnegative_xyz(
+		local_attribute_halo_xyz,
+		'local_attribute_halo_xyz',
+	)
+	return tuple(
+		local_axis + 2 * halo_axis
+		for local_axis, halo_axis in zip(
+			local_crop_size,
+			local_attribute_halo,
+			strict=True,
+		)
+	)
+
+
+def compute_context_compute_size_xyz(
+	context_crop_size_xyz: Sequence[int],
+	context_downsample_xyz: Sequence[int],
+	context_attribute_halo_xyz: Sequence[int],
+) -> XYZ:
+	"""Return source crop size needed to compute low-resolution context attributes."""
+	context_crop_size = _validate_positive_xyz(
+		context_crop_size_xyz,
+		'context_crop_size_xyz',
+	)
+	context_downsample = _validate_positive_xyz(
+		context_downsample_xyz,
+		'context_downsample_xyz',
+	)
+	context_attribute_halo = _validate_nonnegative_xyz(
+		context_attribute_halo_xyz,
+		'context_attribute_halo_xyz',
+	)
+	return tuple(
+		context_axis + 2 * halo_axis * downsample_axis
+		for context_axis, downsample_axis, halo_axis in zip(
+			context_crop_size,
+			context_downsample,
+			context_attribute_halo,
+			strict=True,
+		)
+	)
+
+
+def compute_required_full_halo_size_xyz(  # noqa: PLR0913
+	local_crop_size_xyz: Sequence[int],
+	local_attribute_halo_xyz: Sequence[int],
+	*,
+	use_context: bool,
+	context_crop_size_xyz: Sequence[int] | None = None,
+	context_downsample_xyz: Sequence[int] | None = None,
+	context_attribute_halo_xyz: Sequence[int] | None = None,
+) -> XYZ:
+	"""Return minimum source volume size for full local/context halo crops."""
+	local_compute_size = compute_local_compute_size_xyz(
+		local_crop_size_xyz,
+		local_attribute_halo_xyz,
+	)
+	if not use_context:
+		return local_compute_size
+	if (
+		context_crop_size_xyz is None
+		or context_downsample_xyz is None
+		or context_attribute_halo_xyz is None
+	):
+		msg = 'context geometry is required when use_context=True'
+		raise ValueError(msg)
+	context_compute_size = compute_context_compute_size_xyz(
+		context_crop_size_xyz,
+		context_downsample_xyz,
+		context_attribute_halo_xyz,
+	)
+	return tuple(
+		max(local_axis, context_axis)
+		for local_axis, context_axis in zip(
+			local_compute_size,
+			context_compute_size,
+			strict=True,
+		)
+	)
+
+
 def sample_random_center(
 	shape_xyz: Sequence[int],
 	margin_xyz: Sequence[int],
@@ -100,26 +190,46 @@ def sample_random_local_crop_with_margin(
 	rng: np.random.Generator,
 ) -> CropRequest:
 	"""Sample local payload crop so payload+margin is inside the volume."""
+	return sample_random_local_crop_with_margins(
+		shape_xyz,
+		local_size_xyz,
+		margin_xyz,
+		margin_xyz,
+		rng,
+	)
+
+
+def sample_random_local_crop_with_margins(
+	shape_xyz: Sequence[int],
+	local_size_xyz: Sequence[int],
+	margin_left_xyz: Sequence[int],
+	margin_right_xyz: Sequence[int],
+	rng: np.random.Generator,
+) -> CropRequest:
+	"""Sample local payload crop so asymmetric margins are inside the volume."""
 	shape = _validate_positive_xyz(shape_xyz, 'shape_xyz')
 	local_size = _validate_positive_xyz(local_size_xyz, 'local_size_xyz')
-	margin = _validate_nonnegative_xyz(margin_xyz, 'margin_xyz')
+	margin_left = _validate_nonnegative_xyz(margin_left_xyz, 'margin_left_xyz')
+	margin_right = _validate_nonnegative_xyz(margin_right_xyz, 'margin_right_xyz')
 	if any(
-		shape_axis < size_axis + 2 * margin_axis
-		for shape_axis, size_axis, margin_axis in zip(
+		shape_axis < left_axis + size_axis + right_axis
+		for shape_axis, size_axis, left_axis, right_axis in zip(
 			shape,
 			local_size,
-			margin,
+			margin_left,
+			margin_right,
 			strict=True,
 		)
 	):
 		return sample_random_local_crop(shape, local_size, rng)
 
 	start = tuple(
-		int(rng.integers(margin_axis, shape_axis - size_axis - margin_axis + 1))
-		for shape_axis, size_axis, margin_axis in zip(
+		int(rng.integers(left_axis, shape_axis - size_axis - right_axis + 1))
+		for shape_axis, size_axis, left_axis, right_axis in zip(
 			shape,
 			local_size,
-			margin,
+			margin_left,
+			margin_right,
 			strict=True,
 		)
 	)
@@ -227,9 +337,13 @@ def _validate_downsample(value: int | Sequence[int]) -> int | XYZ:
 
 __all__ = [
 	'compute_centered_start',
+	'compute_context_compute_size_xyz',
+	'compute_local_compute_size_xyz',
+	'compute_required_full_halo_size_xyz',
 	'expand_request_with_halo',
 	'make_context_request',
 	'sample_random_center',
 	'sample_random_local_crop',
 	'sample_random_local_crop_with_margin',
+	'sample_random_local_crop_with_margins',
 ]

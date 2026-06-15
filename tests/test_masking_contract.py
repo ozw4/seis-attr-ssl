@@ -64,6 +64,7 @@ def test_pretrain_sample_masking_contract(tmp_path: Path) -> None:
 		local_crop_size_xyz=LOCAL_SIZE_XYZ,
 		context_crop_size_xyz=CONTEXT_SIZE_XYZ,
 		context_downsample=CONTEXT_DOWNSAMPLE,
+		require_full_halo_inside_volume=False,
 		patch_size_xyz=PATCH_SIZE_XYZ,
 		min_input_attributes=2,
 		max_input_attributes=2,
