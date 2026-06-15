@@ -44,5 +44,8 @@ services:
         source: /home/aiuser4/Desktop/issue_forge
         target: /workspace/vendor/issue_forge
         read_only: true
+      - type: bind
+        source: /home/aiuser4/Desktop/.config/gh/
+        target: /home/dcuser/.config/gh/
     stdin_open: true
     tty: true
