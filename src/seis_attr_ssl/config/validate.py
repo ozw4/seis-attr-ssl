@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
 
@@ -14,13 +14,7 @@ from seis_attr_ssl.config.schema import (
 	EXPECTED_ATTRIBUTE_MODE,
 	EXPECTED_ATTRIBUTES,
 	EXPECTED_BASE_SEISMIC_KIND,
-	EXPECTED_CONTEXT_ATTRIBUTE_HALO,
-	EXPECTED_CONTEXT_CROP_SIZE,
-	EXPECTED_CONTEXT_DOWNSAMPLE,
 	EXPECTED_GRID_ORDER,
-	EXPECTED_LOCAL_ATTRIBUTE_HALO,
-	EXPECTED_LOCAL_CROP_SIZE,
-	EXPECTED_REQUIRE_FULL_HALO_INSIDE_VOLUME,
 	EXPECTED_VOLUME_FORMAT,
 	F3_ALLOWED_STAGES,
 	KNOWN_STAGES,
@@ -48,12 +42,16 @@ def validate_config(config: _T) -> _T:
 	if 'attribute_mode' in data:
 		_validate_equal(data, 'attribute_mode', EXPECTED_ATTRIBUTE_MODE)
 	_validate_optional_npy_path(data, 'base_seismic_path')
-	_validate_equal(data, 'local_crop_size', EXPECTED_LOCAL_CROP_SIZE)
-	_validate_equal(data, 'context_crop_size', EXPECTED_CONTEXT_CROP_SIZE)
-	_validate_equal(data, 'context_downsample', EXPECTED_CONTEXT_DOWNSAMPLE)
-	_validate_context_downsample(data)
+	local_crop_size, context_crop_size, context_downsample = (
+		_validate_data_geometry(data)
+	)
 	if stage == 'pretrain_mae':
-		_validate_attribute_halo_config(data)
+		_validate_attribute_halo_config(
+			data,
+			local_crop_size,
+			context_crop_size,
+			context_downsample,
+		)
 
 	attributes = _required_mapping(config, 'attributes')
 	_validate_attributes(attributes)
@@ -79,7 +77,9 @@ def validate_config(config: _T) -> _T:
 		_validate_train(_required_mapping(config, 'train'))
 
 	if 'model' in config:
-		_validate_model(_required_mapping(config, 'model'))
+		model = _required_mapping(config, 'model')
+		_validate_model(model)
+		_validate_local_crop_patch_size(local_crop_size, model)
 
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
@@ -116,22 +116,108 @@ def _validate_equal(
 		raise ValueError(msg)
 
 
-def _validate_context_downsample(data: Mapping[str, object]) -> None:
-	context_crop_size = data.get('context_crop_size')
-	context_downsample = data.get('context_downsample')
-	local_crop_size = data.get('local_crop_size')
+def _validate_data_geometry(
+	data: Mapping[str, object],
+) -> tuple[
+	tuple[int, int, int],
+	tuple[int, int, int] | None,
+	tuple[int, int, int] | None,
+]:
+	local_crop_size = _validate_xyz_positive_ints(
+		data,
+		'local_crop_size',
+		prefix='data',
+	)
+	use_context = _validate_bool(data, 'use_context', prefix='data')
 
-	if not isinstance(context_crop_size, list) or not isinstance(local_crop_size, list):
-		msg = 'data.context_crop_size and data.local_crop_size must be lists'
-		raise TypeError(msg)
-	if not isinstance(context_downsample, int):
-		msg = 'data.context_downsample must be an integer'
-		raise TypeError(msg)
-
-	downsampled = [size // context_downsample for size in context_crop_size]
-	if any(size % context_downsample != 0 for size in context_crop_size):
-		msg = 'data.context_crop_size must be divisible by data.context_downsample'
+	context_crop_size = None
+	context_downsample = None
+	if use_context and (
+		'context_crop_size' not in data or 'context_downsample' not in data
+	):
+		msg = (
+			'data.context_crop_size and data.context_downsample are required '
+			'when data.use_context is true'
+		)
 		raise ValueError(msg)
+	if use_context or 'context_crop_size' in data:
+		context_crop_size = _validate_xyz_positive_ints(
+			data,
+			'context_crop_size',
+			prefix='data',
+		)
+	if use_context or 'context_downsample' in data:
+		context_downsample = _validate_context_downsample(data)
+	if use_context:
+		_validate_context_geometry(
+			local_crop_size,
+			context_crop_size,
+			context_downsample,
+		)
+	if 'local_attribute_halo' in data:
+		_validate_xyz_nonnegative_ints(
+			data,
+			'local_attribute_halo',
+			prefix='data',
+		)
+	if 'context_attribute_halo' in data:
+		_validate_xyz_nonnegative_ints(
+			data,
+			'context_attribute_halo',
+			prefix='data',
+		)
+	if 'require_full_halo_inside_volume' in data:
+		_validate_bool(data, 'require_full_halo_inside_volume', prefix='data')
+	return local_crop_size, context_crop_size, context_downsample
+
+
+def _validate_context_downsample(
+	data: Mapping[str, object],
+) -> tuple[int, int, int]:
+	value = data.get('context_downsample')
+	if isinstance(value, bool):
+		msg = (
+			'data.context_downsample must be a positive integer or list; '
+			f'got {value!r}'
+		)
+		raise TypeError(msg)
+	if isinstance(value, Integral):
+		downsample = int(value)
+		if downsample <= 0:
+			msg = f'data.context_downsample must be positive; got {downsample!r}'
+			raise ValueError(msg)
+		return (downsample, downsample, downsample)
+	return _validate_xyz_positive_ints(data, 'context_downsample', prefix='data')
+
+
+def _validate_context_geometry(
+	local_crop_size: tuple[int, int, int],
+	context_crop_size: tuple[int, int, int],
+	context_downsample: tuple[int, int, int],
+) -> None:
+	if any(
+		context_size % downsample != 0
+		for context_size, downsample in zip(
+			context_crop_size,
+			context_downsample,
+			strict=True,
+		)
+	):
+		msg = (
+			'data.context_crop_size must be divisible by '
+			f'data.context_downsample; got {context_crop_size!r} and '
+			f'{context_downsample!r}'
+		)
+		raise ValueError(msg)
+
+	downsampled = tuple(
+		context_size // downsample
+		for context_size, downsample in zip(
+			context_crop_size,
+			context_downsample,
+			strict=True,
+		)
+	)
 	if downsampled != local_crop_size:
 		msg = (
 			'data.context_crop_size / data.context_downsample '
@@ -141,51 +227,42 @@ def _validate_context_downsample(data: Mapping[str, object]) -> None:
 		raise ValueError(msg)
 
 
-def _validate_attribute_halo_config(data: Mapping[str, object]) -> None:
+def _validate_attribute_halo_config(
+	data: Mapping[str, object],
+	local_crop_size: tuple[int, int, int],
+	context_crop_size: tuple[int, int, int] | None,
+	context_downsample: tuple[int, int, int] | None,
+) -> None:
 	local_halo = _validate_xyz_nonnegative_ints(
 		data,
 		'local_attribute_halo',
 		prefix='data',
 	)
-	context_halo = _validate_xyz_nonnegative_ints(
-		data,
-		'context_attribute_halo',
-		prefix='data',
-	)
-	_validate_equal(
-		data,
-		'local_attribute_halo',
-		EXPECTED_LOCAL_ATTRIBUTE_HALO,
-	)
-	_validate_equal(
-		data,
-		'context_attribute_halo',
-		EXPECTED_CONTEXT_ATTRIBUTE_HALO,
-	)
 	_validate_bool(data, 'require_full_halo_inside_volume', prefix='data')
-	_validate_equal(
-		data,
-		'require_full_halo_inside_volume',
-		EXPECTED_REQUIRE_FULL_HALO_INSIDE_VOLUME,
-	)
-
-	local_crop_size = _require_xyz_list(data, 'local_crop_size', prefix='data')
-	context_crop_size = _require_xyz_list(data, 'context_crop_size', prefix='data')
-	context_downsample = _validate_positive_int(
-		data,
-		'context_downsample',
-		prefix='data',
-	)
-	downsampled_context_size = [
-		size // context_downsample
-		for size in context_crop_size
-	]
 	_validate_compute_crop_size(local_crop_size, local_halo, 'local')
-	_validate_compute_crop_size(downsampled_context_size, context_halo, 'context')
+	if context_crop_size is not None and context_downsample is not None:
+		context_halo = _validate_xyz_nonnegative_ints(
+			data,
+			'context_attribute_halo',
+			prefix='data',
+		)
+		downsampled_context_size = tuple(
+			size // downsample
+			for size, downsample in zip(
+				context_crop_size,
+				context_downsample,
+				strict=True,
+			)
+		)
+		_validate_compute_crop_size(
+			downsampled_context_size,
+			context_halo,
+			'context',
+		)
 
 
 def _validate_compute_crop_size(
-	crop_size: list[int],
+	crop_size: Sequence[int],
 	halo_xyz: tuple[int, int, int],
 	name: str,
 ) -> None:
@@ -282,6 +359,26 @@ def _validate_model(model: Mapping[str, object]) -> None:
 			'context_token_min_valid_fraction',
 			prefix='model',
 		)
+	if 'patch_size' in model:
+		_validate_xyz_positive_ints(model, 'patch_size', prefix='model')
+
+
+def _validate_local_crop_patch_size(
+	local_crop_size: tuple[int, int, int],
+	model: Mapping[str, object],
+) -> None:
+	if 'patch_size' not in model:
+		return
+	patch_size = _validate_xyz_positive_ints(model, 'patch_size', prefix='model')
+	if any(
+		crop_axis % patch_axis != 0
+		for crop_axis, patch_axis in zip(local_crop_size, patch_size, strict=True)
+	):
+		msg = (
+			'data.local_crop_size must be divisible by model.patch_size; '
+			f'got {local_crop_size!r} and {patch_size!r}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_probability(parent: Mapping[str, object], key: str) -> float:
@@ -360,11 +457,17 @@ def _validate_bool(
 	return value
 
 
-def _validate_xyz_positive_ints(parent: Mapping[str, object], key: str) -> None:
-	value = _require_xyz_list(parent, key, prefix='masking')
+def _validate_xyz_positive_ints(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str = 'masking',
+) -> tuple[int, int, int]:
+	value = _require_xyz_list(parent, key, prefix=prefix)
 	if any(int(item) <= 0 for item in value):
-		msg = f'masking.{key} values must be positive; got {value!r}'
+		msg = f'{prefix}.{key} values must be positive; got {value!r}'
 		raise ValueError(msg)
+	return tuple(value)
 
 
 def _validate_xyz_nonnegative_ints(

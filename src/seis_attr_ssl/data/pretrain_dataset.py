@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from numbers import Integral, Real
 from typing import TYPE_CHECKING, cast
 
@@ -31,12 +31,12 @@ from seis_attr_ssl.data.volume_store import NpyMemmapVolumeStore
 from seis_attr_ssl.masking import build_mae_masking_plan
 
 if TYPE_CHECKING:
-	from collections.abc import Sequence
 	from pathlib import Path
 
 	from seis_attr_ssl.data.schema import CropRequest, SurveyManifest
 
 XYZ = tuple[int, int, int]
+ContextDownsample = int | XYZ
 
 
 class NopimsAttributePretrainDataset:
@@ -50,7 +50,7 @@ class NopimsAttributePretrainDataset:
 		local_attribute_halo_xyz: Sequence[int] = (16, 16, 64),
 		require_full_halo_inside_volume: bool = True,  # noqa: FBT001, FBT002
 		context_crop_size_xyz: Sequence[int] = (512, 512, 512),
-		context_downsample: int = 4,
+		context_downsample: int | Sequence[int] = 4,
 		context_attribute_halo_xyz: Sequence[int] = (8, 8, 16),
 		use_context: bool = True,  # noqa: FBT001, FBT002
 		patch_size_xyz: Sequence[int] = (8, 8, 8),
@@ -86,10 +86,11 @@ class NopimsAttributePretrainDataset:
 			context_crop_size_xyz,
 			'context_crop_size_xyz',
 		)
-		self.context_downsample = _validate_positive_int(
+		self.context_downsample = _validate_downsample(
 			context_downsample,
 			'context_downsample',
 		)
+		self.context_downsample_xyz = _downsample_xyz(self.context_downsample)
 		self.context_attribute_halo_xyz = _validate_nonnegative_xyz(
 			context_attribute_halo_xyz,
 			'context_attribute_halo_xyz',
@@ -136,7 +137,7 @@ class NopimsAttributePretrainDataset:
 			_validate_context_geometry(
 				self.local_crop_size_xyz,
 				self.context_crop_size_xyz,
-				self.context_downsample,
+				self.context_downsample_xyz,
 			)
 
 		self._store = NpyMemmapVolumeStore()
@@ -297,8 +298,12 @@ class NopimsAttributePretrainDataset:
 				),
 				'context_lowres_compute_size_xyz': (
 					tuple(
-						size_axis // self.context_downsample
-						for size_axis in context_compute_request.size_xyz
+						size_axis // downsample_axis
+						for size_axis, downsample_axis in zip(
+							context_compute_request.size_xyz,
+							self.context_downsample_xyz,
+							strict=True,
+						)
 					)
 					if context_compute_request is not None
 					else None
@@ -429,7 +434,7 @@ class NopimsAttributePretrainDataset:
 			normalized_context, context_valid_mask = downsample_context_masked_mean(
 				normalize_base_seismic(base_crop, stats),
 				valid_mask,
-				self.context_downsample,
+				self.context_downsample_xyz,
 			)
 			context_result = generate_mvp_attributes_for_payload(
 				normalized_context,
@@ -455,7 +460,7 @@ class NopimsAttributePretrainDataset:
 			context_volume, attribute_valid_mask = downsample_context_masked_mean(
 				crop,
 				valid_mask,
-				self.context_downsample,
+				self.context_downsample_xyz,
 			)
 			context_volumes.append(context_volume[lowres_payload_slices])
 			if context_valid_mask is None:
@@ -481,10 +486,11 @@ class NopimsAttributePretrainDataset:
 			source_halo_xyz,
 		)
 		lowres_payload_slices = tuple(
-			slice(halo_axis, halo_axis + size_axis // self.context_downsample)
-			for halo_axis, size_axis in zip(
+			slice(halo_axis, halo_axis + size_axis // downsample_axis)
+			for halo_axis, size_axis, downsample_axis in zip(
 				self.context_attribute_halo_xyz,
 				self.context_crop_size_xyz,
+				self.context_downsample_xyz,
 				strict=True,
 			)
 		)
@@ -521,8 +527,12 @@ class NopimsAttributePretrainDataset:
 
 	def _context_source_halo_xyz(self) -> XYZ:
 		source_halo_xyz = tuple(
-			halo_axis * self.context_downsample
-			for halo_axis in self.context_attribute_halo_xyz
+			halo_axis * downsample_axis
+			for halo_axis, downsample_axis in zip(
+				self.context_attribute_halo_xyz,
+				self.context_downsample_xyz,
+				strict=True,
+			)
 		)
 		return cast('XYZ', source_halo_xyz)
 
@@ -610,6 +620,29 @@ def _validate_positive_int(value: int, name: str) -> int:
 	return count
 
 
+def _validate_downsample(value: int | Sequence[int], name: str) -> ContextDownsample:
+	if isinstance(value, bool):
+		msg = f'{name} must be a positive integer or triple; got {value!r}'
+		raise TypeError(msg)
+	if isinstance(value, Integral):
+		count = int(value)
+		if count <= 0:
+			msg = f'{name} must be positive; got {count!r}'
+			raise ValueError(msg)
+		return count
+	downsample_xyz = _validate_xyz(value, name)
+	if len(set(downsample_xyz)) == 1:
+		return downsample_xyz[0]
+	return downsample_xyz
+
+
+def _downsample_xyz(value: ContextDownsample) -> XYZ:
+	if isinstance(value, Integral):
+		downsample = int(value)
+		return (downsample, downsample, downsample)
+	return value
+
+
 def _validate_nonnegative_int(value: int, name: str) -> int:
 	if isinstance(value, bool) or not isinstance(value, Integral):
 		msg = f'{name} must be an integer; got {value!r}'
@@ -642,15 +675,29 @@ def _validate_spatial_mask_mode(value: str) -> str:
 def _validate_context_geometry(
 	local_crop_size_xyz: XYZ,
 	context_crop_size_xyz: XYZ,
-	context_downsample: int,
+	context_downsample_xyz: XYZ,
 ) -> None:
-	if any(axis % context_downsample != 0 for axis in context_crop_size_xyz):
+	if any(
+		context_axis % downsample_axis != 0
+		for context_axis, downsample_axis in zip(
+			context_crop_size_xyz,
+			context_downsample_xyz,
+			strict=True,
+		)
+	):
 		msg = (
 			'context_crop_size_xyz must be divisible by context_downsample; '
-			f'got {context_crop_size_xyz!r} and {context_downsample!r}'
+			f'got {context_crop_size_xyz!r} and {context_downsample_xyz!r}'
 		)
 		raise ValueError(msg)
-	context_output = tuple(axis // context_downsample for axis in context_crop_size_xyz)
+	context_output = tuple(
+		context_axis // downsample_axis
+		for context_axis, downsample_axis in zip(
+			context_crop_size_xyz,
+			context_downsample_xyz,
+			strict=True,
+		)
+	)
 	if context_output != local_crop_size_xyz:
 		msg = (
 			'downsampled context shape must match local crop size; '

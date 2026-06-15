@@ -356,8 +356,8 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.local_crop_size_xyz == (128, 128, 128)
 	assert dataset.local_attribute_halo_xyz == (16, 16, 64)
 	assert dataset.require_full_halo_inside_volume is True
-	assert dataset.context_crop_size_xyz == (512, 512, 512)
-	assert dataset.context_downsample == 4
+	assert dataset.context_crop_size_xyz == (256, 256, 512)
+	assert dataset.context_downsample == (2, 2, 4)
 	assert dataset.context_attribute_halo_xyz == (8, 8, 16)
 	assert dataset.use_context is True
 	assert dataset.patch_size_xyz == (8, 8, 8)

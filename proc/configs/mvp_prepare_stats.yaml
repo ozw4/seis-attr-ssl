@@ -13,8 +13,8 @@ data:
   attribute_mode: on_the_fly
   base_seismic_path: /home/dcuser/data/NOPIMS/survey/seismic/dip_steered_median_filtered.npy
   local_crop_size: [128, 128, 128]
-  context_crop_size: [512, 512, 512]
-  context_downsample: 4
+  context_crop_size: [256, 256, 512]
+  context_downsample: [2, 2, 4]
   use_context: true
 
 attributes:

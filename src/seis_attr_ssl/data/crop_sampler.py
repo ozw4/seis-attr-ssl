@@ -134,16 +134,11 @@ def sample_random_local_crop_with_margin(
 def make_context_request(
 	local_request: CropRequest,
 	context_size_xyz: Sequence[int],
-	context_downsample: int,
+	context_downsample: int | Sequence[int],
 ) -> CropRequest:
 	"""Return a context crop request centered on ``local_request``."""
 	context_size = _validate_positive_xyz(context_size_xyz, 'context_size_xyz')
-	if not isinstance(context_downsample, Integral):
-		msg = f'context_downsample must be an integer; got {context_downsample!r}'
-		raise TypeError(msg)
-	if context_downsample <= 0:
-		msg = f'context_downsample must be positive; got {context_downsample!r}'
-		raise ValueError(msg)
+	downsample = _validate_downsample(context_downsample)
 
 	center = tuple(
 		start_axis + size_axis // 2
@@ -158,7 +153,7 @@ def make_context_request(
 		start_xyz=compute_centered_start(center, context_size),
 		size_xyz=context_size,
 		context_size_xyz=None,
-		context_downsample=int(context_downsample),
+		context_downsample=downsample,
 	)
 
 
@@ -214,6 +209,22 @@ def _validate_nonnegative_xyz(value: Sequence[int], name: str) -> XYZ:
 		msg = f'{name} values must be nonnegative; got {xyz!r}'
 		raise ValueError(msg)
 	return xyz
+
+
+def _validate_downsample(value: int | Sequence[int]) -> int | XYZ:
+	if isinstance(value, bool):
+		msg = f'context_downsample must be a positive integer or triple; got {value!r}'
+		raise TypeError(msg)
+	if isinstance(value, Integral):
+		downsample = int(value)
+		if downsample <= 0:
+			msg = f'context_downsample must be positive; got {downsample!r}'
+			raise ValueError(msg)
+		return downsample
+	downsample_xyz = _validate_positive_xyz(value, 'context_downsample')
+	if len(set(downsample_xyz)) == 1:
+		return downsample_xyz[0]
+	return downsample_xyz
 
 
 __all__ = [

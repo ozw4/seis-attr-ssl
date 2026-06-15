@@ -74,8 +74,8 @@ data:
   volume_format: npy_memmap
   base_seismic_kind: dip_steered_median_filtered
   local_crop_size: [128, 128, 128]
-  context_crop_size: [512, 512, 512]
-  context_downsample: 4
+  context_crop_size: [256, 256, 512]
+  context_downsample: [2, 2, 4]
   local_attribute_halo: [16, 16, 64]
   context_attribute_halo: [8, 8, 16]
   require_full_halo_inside_volume: true
@@ -173,10 +173,40 @@ def test_invalid_attribute_mode_raises_clear_value_error() -> None:
 
 def test_invalid_crop_downsample_combination_raises_clear_value_error() -> None:
 	cfg = _valid_config()
-	cfg['data']['context_crop_size'] = [256, 512, 512]
+	cfg['data']['context_downsample'] = [2, 2, 2]
 
-	with pytest.raises(ValueError, match='data\\.context_crop_size'):
+	with pytest.raises(
+		ValueError,
+		match='data\\.context_crop_size / data\\.context_downsample',
+	):
 		validate_config(cfg)
+
+
+def test_axis_wise_context_geometry_is_allowed() -> None:
+	cfg = _valid_config()
+	cfg['data']['local_crop_size'] = [128, 128, 128]
+	cfg['data']['context_crop_size'] = [256, 256, 512]
+	cfg['data']['context_downsample'] = [2, 2, 4]
+
+	validate_config(cfg)
+
+
+def test_scalar_context_downsample_is_allowed() -> None:
+	cfg = _valid_config()
+	cfg['data']['local_crop_size'] = [128, 128, 128]
+	cfg['data']['context_crop_size'] = [256, 256, 256]
+	cfg['data']['context_downsample'] = 2
+
+	validate_config(cfg)
+
+
+def test_context_geometry_is_not_required_when_context_is_disabled() -> None:
+	cfg = _valid_config()
+	cfg['data']['use_context'] = False
+	del cfg['data']['context_crop_size']
+	del cfg['data']['context_downsample']
+
+	validate_config(cfg)
 
 
 @pytest.mark.parametrize(
@@ -202,20 +232,18 @@ def test_invalid_attribute_halo_raises_clear_error(
 		validate_config(cfg)
 
 
-def test_attribute_halo_values_are_fixed_for_mvp_mae() -> None:
+def test_attribute_halo_values_are_configurable_for_mvp_mae() -> None:
 	cfg = _valid_config()
 	cfg['data']['local_attribute_halo'] = [8, 8, 8]
 
-	with pytest.raises(ValueError, match='data\\.local_attribute_halo'):
-		validate_config(cfg)
+	validate_config(cfg)
 
 
-def test_require_full_halo_inside_volume_must_be_true() -> None:
+def test_require_full_halo_inside_volume_is_configurable() -> None:
 	cfg = _valid_config()
 	cfg['data']['require_full_halo_inside_volume'] = False
 
-	with pytest.raises(ValueError, match='data\\.require_full_halo_inside_volume'):
-		validate_config(cfg)
+	validate_config(cfg)
 
 
 def test_require_full_halo_inside_volume_must_be_bool() -> None:
@@ -354,6 +382,14 @@ def test_invalid_context_token_min_valid_fraction_raises_clear_error(
 		error_type,
 		match='model\\.context_token_min_valid_fraction',
 	):
+		validate_config(cfg)
+
+
+def test_local_crop_size_must_be_divisible_by_model_patch_size() -> None:
+	cfg = _valid_config()
+	cfg['model']['patch_size'] = [7, 8, 8]
+
+	with pytest.raises(ValueError, match='data\\.local_crop_size'):
 		validate_config(cfg)
 
 

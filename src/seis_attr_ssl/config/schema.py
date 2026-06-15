@@ -1,4 +1,4 @@
-"""Fixed MVP configuration values."""
+"""MVP configuration defaults and fixed values."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ EXPECTED_VOLUME_FORMAT: Final = 'npy_memmap'
 EXPECTED_BASE_SEISMIC_KIND: Final = 'dip_steered_median_filtered'
 EXPECTED_ATTRIBUTE_MODE: Final = 'on_the_fly'
 EXPECTED_LOCAL_CROP_SIZE: Final = [128, 128, 128]
-EXPECTED_CONTEXT_CROP_SIZE: Final = [512, 512, 512]
-EXPECTED_CONTEXT_DOWNSAMPLE: Final = 4
+EXPECTED_CONTEXT_CROP_SIZE: Final = [256, 256, 512]
+EXPECTED_CONTEXT_DOWNSAMPLE: Final = [2, 2, 4]
 EXPECTED_LOCAL_ATTRIBUTE_HALO: Final = [16, 16, 64]
 EXPECTED_CONTEXT_ATTRIBUTE_HALO: Final = [8, 8, 16]
 EXPECTED_REQUIRE_FULL_HALO_INSIDE_VOLUME: Final = True
