@@ -232,6 +232,45 @@ def test_prepare_nopims_normalization_stats_dry_run_reports_counts(
 	assert 'normalization_stats.compute: skipped' in result.stdout
 
 
+def test_prepare_nopims_normalization_stats_dry_run_missing_manifest_is_actionable(
+	tmp_path: Path,
+) -> None:
+	manifest_path = tmp_path / 'manifests' / 'missing.json'
+	config_path = _write_missing_manifest_stats_config(tmp_path, manifest_path)
+
+	result = run_python_proc(
+		Path('proc/prepare_nopims_normalization_stats.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert result.stderr == ''
+	assert f'normalization_stats.manifest_path: {manifest_path}' in result.stdout
+	assert 'normalization_stats.manifest_exists: false' in result.stdout
+	assert 'normalization_stats.compute: skipped' in result.stdout
+	assert 'manifest does not exist' in result.stdout
+	assert 'proc/build_nopims_manifests.py' in result.stdout
+
+
+def test_prepare_nopims_normalization_stats_missing_manifest_error_is_actionable(
+	tmp_path: Path,
+) -> None:
+	manifest_path = tmp_path / 'manifests' / 'missing.json'
+	config_path = _write_missing_manifest_stats_config(tmp_path, manifest_path)
+
+	result = run_python_proc(
+		Path('proc/prepare_nopims_normalization_stats.py'),
+		'--config',
+		config_path,
+	)
+
+	assert result.returncode != 0
+	assert f'manifests.train does not exist: {manifest_path}' in result.stderr
+	assert 'proc/build_nopims_manifests.py' in result.stderr
+
+
 def _write_bulk_stats_inputs(
 	tmp_path: Path,
 ) -> tuple[Path, Path, list[Path], list[Path]]:
@@ -269,6 +308,14 @@ def _write_bulk_stats_inputs(
 		],
 		[first_path, second_path],
 	)
+
+
+def _write_missing_manifest_stats_config(tmp_path: Path, manifest_path: Path) -> Path:
+	config = load_config(PROJECT_ROOT / 'proc/configs/mvp_prepare_nopims_stats.yaml')
+	config['manifests']['train'] = str(manifest_path)
+	config_path = tmp_path / 'prepare_nopims_stats.yaml'
+	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
+	return config_path
 
 
 def _write_manifest_volume(path: Path, values: np.ndarray) -> Path:
