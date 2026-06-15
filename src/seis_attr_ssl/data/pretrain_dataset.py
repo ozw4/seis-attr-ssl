@@ -22,7 +22,10 @@ from seis_attr_ssl.data.crop_sampler import (
 	sample_random_local_crop,
 	sample_random_local_crop_with_margin,
 )
-from seis_attr_ssl.data.downsample import downsample_context_masked_mean
+from seis_attr_ssl.data.downsample import (
+	downsample_context_masked_mean,
+	normalize_downsample_xyz,
+)
 from seis_attr_ssl.data.normalization import (
 	SurveyNormalizationStats,
 	load_normalization_stats,
@@ -282,6 +285,9 @@ class NopimsAttributePretrainDataset:
 				),
 				'context_downsample': (
 					self.context_downsample if self.use_context else None
+				),
+				'context_downsample_xyz': (
+					self.context_downsample_xyz if self.use_context else None
 				),
 				'context_attribute_halo_xyz': (
 					self.context_attribute_halo_xyz if self.use_context else None
@@ -630,17 +636,15 @@ def _validate_downsample(value: int | Sequence[int], name: str) -> ContextDownsa
 			msg = f'{name} must be positive; got {count!r}'
 			raise ValueError(msg)
 		return count
-	downsample_xyz = _validate_xyz(value, name)
-	if len(set(downsample_xyz)) == 1:
-		return downsample_xyz[0]
-	return downsample_xyz
+	try:
+		return normalize_downsample_xyz(value)
+	except (TypeError, ValueError) as exc:
+		msg = f'{name} must be a positive integer or triple; got {value!r}'
+		raise type(exc)(msg) from exc
 
 
 def _downsample_xyz(value: ContextDownsample) -> XYZ:
-	if isinstance(value, Integral):
-		downsample = int(value)
-		return (downsample, downsample, downsample)
-	return value
+	return normalize_downsample_xyz(value)
 
 
 def _validate_nonnegative_int(value: int, name: str) -> int:

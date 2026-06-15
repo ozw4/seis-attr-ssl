@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 	import numpy as np
 
+from seis_attr_ssl.data.downsample import normalize_downsample_xyz
 from seis_attr_ssl.data.schema import CropRequest
 
 XYZ = tuple[int, int, int]
@@ -221,10 +222,7 @@ def _validate_downsample(value: int | Sequence[int]) -> int | XYZ:
 			msg = f'context_downsample must be positive; got {downsample!r}'
 			raise ValueError(msg)
 		return downsample
-	downsample_xyz = _validate_positive_xyz(value, 'context_downsample')
-	if len(set(downsample_xyz)) == 1:
-		return downsample_xyz[0]
-	return downsample_xyz
+	return normalize_downsample_xyz(value)
 
 
 __all__ = [

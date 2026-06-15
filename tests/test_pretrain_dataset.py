@@ -452,6 +452,44 @@ def test_pretrain_dataset_mvp_halo_sample_contract(
 	assert coords['context_lowres_compute_size_xyz'] == (144, 144, 160)
 	assert coords['context_attribute_halo_xyz'] == (8, 8, 16)
 	assert coords['context_downsample'] == 4
+	assert coords['context_downsample_xyz'] == (4, 4, 4)
+
+
+def test_pretrain_dataset_axis_wise_context_downsample_sample_contract(
+	tmp_path: Path,
+) -> None:
+	names = MVP_ATTRIBUTE_REGISTRY.names[:2]
+	manifest = _write_manifest(
+		tmp_path / 'survey-a',
+		names,
+		shape_xyz=(8, 8, 12),
+		fill_value=5.0,
+	)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(4, 4, 4),
+		context_crop_size_xyz=(8, 8, 12),
+		context_downsample=(2, 2, 3),
+		context_attribute_halo_xyz=(0, 0, 0),
+		patch_size_xyz=(4, 4, 4),
+		min_input_attributes=2,
+		max_input_attributes=2,
+	)
+
+	sample = dataset[0]
+
+	assert sample['context'].shape == (2, 4, 4, 4)
+	assert sample['context_valid_mask'].shape == (4, 4, 4)
+	assert sample['coords']['context_downsample'] == (2, 2, 3)
+	assert sample['coords']['context_downsample_xyz'] == (2, 2, 3)
+	np.testing.assert_array_equal(
+		sample['context'][:, sample['context_valid_mask']],
+		np.full(
+			(2, int(sample['context_valid_mask'].sum())),
+			5.0,
+			dtype=np.float32,
+		),
+	)
 
 
 def test_pretrain_dataset_full_halo_sampling_reserves_context_margin(

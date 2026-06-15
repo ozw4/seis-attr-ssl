@@ -19,6 +19,7 @@ from seis_attr_ssl.config.schema import (
 	F3_ALLOWED_STAGES,
 	KNOWN_STAGES,
 )
+from seis_attr_ssl.data.downsample import normalize_downsample_xyz
 
 Config: TypeAlias = dict[str, object]
 _T = TypeVar('_T', bound=Mapping[str, object])
@@ -175,19 +176,17 @@ def _validate_context_downsample(
 	data: Mapping[str, object],
 ) -> tuple[int, int, int]:
 	value = data.get('context_downsample')
-	if isinstance(value, bool):
+	try:
+		return normalize_downsample_xyz(value)  # type: ignore[arg-type]
+	except TypeError as exc:
 		msg = (
 			'data.context_downsample must be a positive integer or list; '
 			f'got {value!r}'
 		)
-		raise TypeError(msg)
-	if isinstance(value, Integral):
-		downsample = int(value)
-		if downsample <= 0:
-			msg = f'data.context_downsample must be positive; got {downsample!r}'
-			raise ValueError(msg)
-		return (downsample, downsample, downsample)
-	return _validate_xyz_positive_ints(data, 'context_downsample', prefix='data')
+		raise TypeError(msg) from exc
+	except ValueError as exc:
+		msg = f'data.context_downsample must be positive; got {value!r}'
+		raise ValueError(msg) from exc
 
 
 def _validate_context_geometry(
