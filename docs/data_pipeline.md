@@ -46,26 +46,54 @@ np.load(path, mmap_mode="r")
 The grid order is `[x, y, z]`, so a NumPy volume has shape `[X, Y, Z]`. The
 manifest records this as `shape_xyz` and `grid_order: ["x", "y", "z"]`.
 
-Production pretraining defaults are:
+Production pretraining defaults are configurable and recommended for NOPIMS
+volumes with maximum shape around `[300, 300, 1501]`:
 
 ```yaml
 local_crop_size: [128, 128, 128]
-context_crop_size: [512, 512, 512]
-context_downsample: 4
 local_attribute_halo: [16, 16, 64]
+use_context: true
+context_crop_size: [256, 256, 512]
+context_downsample: [2, 2, 4]
 context_attribute_halo: [8, 8, 16]
 require_full_halo_inside_volume: true
 ```
 
-The local halo is in source-grid `[x, y, z]` coordinates. The context halo is
-defined on the downsampled context grid, so its source-space margin is
-`context_attribute_halo * context_downsample`. With the production defaults,
-context attributes are generated on a source compute crop of
-`[576, 576, 640]`, downsampled to `[144, 144, 160]`, and then center-trimmed
-to the `[128, 128, 128]` context payload. Tests may use smaller crops and
-volumes, and small synthetic volumes may fall back to ordinary crop sampling
-when the full halo margin cannot fit. NOPIMS production pretraining assumes the
-full halo fits inside the sampled volume.
+`local_crop_size` is the local payload size returned to the model.
+`local_attribute_halo` is the extra source seismic margin read before local
+attribute generation. `context_crop_size` is the wider source-seismic context
+payload. `context_downsample` is an integer or `[x, y, z]` list that shrinks the
+context payload to the local payload size. `context_attribute_halo` is the halo
+used for attribute generation on the downsampled context grid; in source space,
+it corresponds to `context_attribute_halo * context_downsample`.
+`require_full_halo_inside_volume: true` rejects samples whose halo-expanded
+compute crop would cross the source volume boundary.
+
+With the recommended defaults, the local source crop required for attribute
+generation is:
+
+```text
+local_crop_size + 2 * local_attribute_halo
+[128, 128, 128] + 2 * [16, 16, 64] = [160, 160, 256]
+```
+
+The context source crop required for attribute generation is:
+
+```text
+context_crop_size + 2 * context_attribute_halo * context_downsample
+[256, 256, 512] + 2 * [8, 8, 16] * [2, 2, 4] = [288, 288, 640]
+```
+
+The explicit path-list manifest records source-seismic `.npy` volumes. During
+sampling, local and optional context crops are read from those source volumes
+with halo margins, MVP attributes are generated on the fly, and the halo regions
+are center-trimmed before tensors are returned. To disable context for a smaller
+experiment, override:
+
+```yaml
+data:
+  use_context: false
+```
 
 ## MVP Attributes
 

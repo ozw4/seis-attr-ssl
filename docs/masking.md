@@ -6,12 +6,12 @@ This page defines the MVP masking conventions for NOPIMS MAE pretraining.
 
 All spatial arrays use grid order `[x, y, z]`.
 
-Production pretraining uses:
+Recommended NOPIMS pretraining defaults use:
 
 ```text
 local crop: [128, 128, 128]
-context crop: [512, 512, 512]
-context downsample: 4
+context crop: [256, 256, 512]
+context downsample: [2, 2, 4]
 context after downsample: [128, 128, 128]
 patch size: [8, 8, 8]
 token grid: [16, 16, 16]
@@ -22,6 +22,7 @@ survey boundaries, then downsampled to the local crop shape. Downsampling uses
 only valid in-survey voxels; padded voxels do not contribute to pooled values.
 The returned `context_valid_mask` is `True` where a downsampled context cell had
 at least one valid source voxel.
+Context can be disabled with `data.use_context: false`.
 
 ## Spatial Masks
 
