@@ -141,7 +141,7 @@ class CropRequest:
 	start_xyz: tuple[int, int, int]
 	size_xyz: tuple[int, int, int]
 	context_size_xyz: tuple[int, int, int] | None
-	context_downsample: int
+	context_downsample: int | tuple[int, int, int]
 
 
 class UnlabeledPretrainingSample(TypedDict):

@@ -86,11 +86,12 @@ data:
   base_seismic_kind: dip_steered_median_filtered
   attribute_mode: on_the_fly
   local_crop_size: [128, 128, 128]
-  context_crop_size: [512, 512, 512]
-  context_downsample: 4
+  context_crop_size: [256, 256, 512]
+  context_downsample: [2, 2, 4]
   local_attribute_halo: [16, 16, 64]
   context_attribute_halo: [8, 8, 16]
   require_full_halo_inside_volume: true
+  use_context: true
 attributes:
   names:
     - amplitude_norm

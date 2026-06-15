@@ -47,3 +47,8 @@ of source-seismic `.npy` paths. Relative paths are resolved against
 during sampling. Precomputed attribute volumes are not required. See
 [docs/mae_pretraining.md](docs/mae_pretraining.md) for the batch contract, model
 shape contract, checkpoint contents, and smoke-test command.
+
+Default NOPIMS geometry uses `local_crop_size: [128, 128, 128]`,
+`context_crop_size: [256, 256, 512]`, and `context_downsample: [2, 2, 4]`.
+Context is configurable per experiment and can be disabled with
+`data.use_context: false`.

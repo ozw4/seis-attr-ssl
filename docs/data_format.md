@@ -19,12 +19,17 @@ manifest_source: explicit_path_list
 manifest.input_path_list: /home/dcuser/data/NOPIMS/train_npy_paths.txt
 manifest.normalization_stats_suffix: .normalization_stats.json
 local_crop_size: [128, 128, 128]
-context_crop_size: [512, 512, 512]
-context_downsample: 4
+local_attribute_halo: [16, 16, 64]
+use_context: true
+context_crop_size: [256, 256, 512]
+context_downsample: [2, 2, 4]
+context_attribute_halo: [8, 8, 16]
+require_full_halo_inside_volume: true
 ```
 
-With `context_downsample: 4`, the `[512, 512, 512]` context crop is
-downsampled to `[128, 128, 128]`.
+The recommended NOPIMS context crop `[256, 256, 512]` is downsampled by
+`[2, 2, 4]` to `[128, 128, 128]`. `context_downsample` may be a scalar integer
+or an `[x, y, z]` list. For local-only experiments, set `use_context: false`.
 
 Only survey-wise robust normalization is applied before attribute generation.
 Smooth time/depth trend correction, trace-wise AGC, patch-wise z-score, and

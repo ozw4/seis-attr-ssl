@@ -154,8 +154,10 @@ class StrictAttributeSetMAE3D(nn.Module):
 
 		context_token_count = 0
 		if self.use_context and batch.get('context') is not None:
+			context = _as_tensor(batch['context'], 'context')
+			_validate_context_payload_shape(context, x)
 			context_tokens = self._encode_context(
-				_as_tensor(batch['context'], 'context'),
+				context,
 				attribute_ids,
 				attribute_valid_mask,
 				batch.get('context_valid_mask'),
@@ -351,6 +353,25 @@ def _context_token_valid_mask(
 	)
 	valid_fraction = context_patches.squeeze(2).mean(dim=-1)
 	return valid_fraction >= min_valid_fraction
+
+
+def _validate_context_payload_shape(
+	context: torch.Tensor,
+	x: torch.Tensor,
+) -> None:
+	if context.ndim != 5:
+		msg = (
+			'context must be a 5D tensor with shape [B, C, X, Y, Z]; '
+			f'got shape={tuple(context.shape)!r}'
+		)
+		raise ValueError(msg)
+	if tuple(context.shape) != tuple(x.shape):
+		msg = (
+			'context payload shape must match local x shape after downsample; '
+			f'got context_shape={tuple(context.shape)!r}, '
+			f'x_shape={tuple(x.shape)!r}'
+		)
+		raise ValueError(msg)
 
 
 def _normalize_attribute_groups(

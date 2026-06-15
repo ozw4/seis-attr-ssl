@@ -4,8 +4,8 @@ MVP attributes are generated on the fly during dataset sampling from
 survey-wise robust normalized source seismic crops. The source seismic is the
 `.npy` memmap recorded in the path-list-derived base-seismic manifest.
 
-The local crop is `[128, 128, 128]`. Attribute generation reads a larger
-compute crop and returns the unchanged payload crop shape:
+The default local payload crop is `[128, 128, 128]`. Attribute generation reads
+a larger compute crop and returns the unchanged payload crop shape:
 
 ```text
 local base seismic payload: [128, 128, 128]
@@ -24,18 +24,19 @@ base seismic compute crop
   -> spatial mask for MAE
 ```
 
-The context payload crop is `[512, 512, 512]`, downsampled by 4 to
-`[128, 128, 128]`. Context attribute generation uses a halo of `[8, 8, 16]` on
-the downsampled context grid; in source-space coordinates that halo is
-multiplied by `context_downsample`:
+The recommended NOPIMS context payload crop is `[256, 256, 512]`, downsampled
+by `[2, 2, 4]` to `[128, 128, 128]`. `context_downsample` may be either an
+integer or an `[x, y, z]` list. Context attribute generation uses a halo of
+`[8, 8, 16]` on the downsampled context grid; in source-space coordinates that
+halo is multiplied by `context_downsample`:
 
 ```text
-context source payload: [512, 512, 512]
-context downsample: 4
+context source payload: [256, 256, 512]
+context downsample: [2, 2, 4]
 context low-res payload: [128, 128, 128]
 context low-res halo: [8, 8, 16]
-context source halo: [32, 32, 64]
-context source compute crop: [576, 576, 640]
+context source halo: [16, 16, 64]
+context source compute crop: [288, 288, 640]
 context low-res compute crop: [144, 144, 160]
 ```
 
@@ -53,10 +54,13 @@ base seismic compute crop + halo
 Spatial masking is applied only after attribute generation and center trimming.
 Attributes must not be generated from spatially masked base seismic.
 
-Training samples require full halo coverage inside the volume whenever
-possible. Small synthetic test volumes may fall back to ordinary payload crop
-sampling when the full margin cannot fit; NOPIMS production pretraining assumes
-the full local and context halo fit inside each sampled volume.
+With `data.require_full_halo_inside_volume: true`, training samples require full
+local and context halo coverage inside the source volume, and undersized volumes
+are rejected. Set it to `false` only for small synthetic tests or experiments
+that intentionally permit padded halo reads.
+
+Set `data.use_context: false` to skip context crop reading and context attribute
+generation for experiments that only use the local payload.
 
 Generated attributes follow the stable `seis_attr_ssl` registry order:
 

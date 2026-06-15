@@ -24,7 +24,11 @@ if TYPE_CHECKING:
 		sample_random_center,
 		sample_random_local_crop,
 	)
-	from seis_attr_ssl.data.downsample import downsample_context_mean
+	from seis_attr_ssl.data.downsample import (
+		downsample_context_masked_mean,
+		downsample_context_mean,
+		normalize_downsample_xyz,
+	)
 	from seis_attr_ssl.data.manifest_builder import (
 		ManifestBuildResult,
 		ManifestBuildSummary,
@@ -94,6 +98,7 @@ __all__ = [
 	'center_trim_attribute_result',
 	'compute_centered_start',
 	'compute_normalization_stats',
+	'downsample_context_masked_mean',
 	'downsample_context_mean',
 	'generate_mvp_attributes',
 	'generate_mvp_attributes_for_payload',
@@ -103,6 +108,7 @@ __all__ = [
 	'make_context_request',
 	'make_survey_id_from_path',
 	'normalize_amplitude',
+	'normalize_downsample_xyz',
 	'read_manifest_json',
 	'resolve_npy_path_list',
 	'sample_attribute_subset',
@@ -152,7 +158,9 @@ _ATTRIBUTE_GENERATION_EXPORTS = {
 }
 
 _DOWNSAMPLE_EXPORTS = {
+	'downsample_context_masked_mean',
 	'downsample_context_mean',
+	'normalize_downsample_xyz',
 }
 
 _PRETRAIN_DATASET_EXPORTS = {

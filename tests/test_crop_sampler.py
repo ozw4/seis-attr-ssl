@@ -5,11 +5,15 @@ import pytest
 
 from seis_attr_ssl.data.crop_sampler import (
 	compute_centered_start,
+	compute_context_compute_size_xyz,
+	compute_local_compute_size_xyz,
+	compute_required_full_halo_size_xyz,
 	expand_request_with_halo,
 	make_context_request,
 	sample_random_center,
 	sample_random_local_crop,
 	sample_random_local_crop_with_margin,
+	sample_random_local_crop_with_margins,
 )
 from seis_attr_ssl.data.downsample import (
 	downsample_context_masked_mean,
@@ -33,6 +37,40 @@ def _center(
 
 def test_compute_centered_start_uses_xyz_order() -> None:
 	assert compute_centered_start((100, 200, 300), (10, 20, 30)) == (95, 190, 285)
+
+
+def test_compute_local_compute_size_includes_attribute_halo() -> None:
+	assert compute_local_compute_size_xyz(
+		(128, 128, 128),
+		(16, 16, 64),
+	) == (160, 160, 256)
+
+
+def test_compute_context_compute_size_scales_halo_by_downsample() -> None:
+	assert compute_context_compute_size_xyz(
+		(256, 256, 512),
+		(2, 2, 4),
+		(8, 8, 16),
+	) == (288, 288, 640)
+
+
+def test_compute_required_full_halo_size_uses_context_when_enabled() -> None:
+	assert compute_required_full_halo_size_xyz(
+		(128, 128, 128),
+		(16, 16, 64),
+		use_context=True,
+		context_crop_size_xyz=(256, 256, 512),
+		context_downsample_xyz=(2, 2, 4),
+		context_attribute_halo_xyz=(8, 8, 16),
+	) == (288, 288, 640)
+
+
+def test_compute_required_full_halo_size_uses_local_when_context_disabled() -> None:
+	assert compute_required_full_halo_size_xyz(
+		(128, 128, 128),
+		(16, 16, 64),
+		use_context=False,
+	) == (160, 160, 256)
 
 
 def test_sample_random_center_is_reproducible() -> None:
@@ -179,6 +217,19 @@ def test_sample_random_local_crop_with_margin_falls_back_for_small_volume() -> N
 
 	assert isinstance(request, CropRequest)
 	assert request.size_xyz == LOCAL_SIZE
+
+
+def test_sample_random_local_crop_with_asymmetric_margins_exact_volume() -> None:
+	request = sample_random_local_crop_with_margins(
+		(9, 9, 9),
+		(4, 4, 4),
+		(2, 2, 2),
+		(3, 3, 3),
+		np.random.default_rng(42),
+	)
+
+	assert request.start_xyz == (2, 2, 2)
+	assert request.size_xyz == (4, 4, 4)
 
 
 def test_local_crop_sampling_is_reproducible() -> None:

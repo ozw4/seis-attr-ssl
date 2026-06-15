@@ -92,10 +92,15 @@ Crop sizes:
 
 ```yaml
 local_crop_size: [128, 128, 128]
-context_crop_size: [512, 512, 512]
-context_downsample: 4
+context_crop_size: [256, 256, 512]
+context_downsample: [2, 2, 4]
 context_after_downsample: [128, 128, 128]
 ```
+
+`context_crop_size` is the source-seismic context payload size, and
+`context_downsample` is an integer or `[x, y, z]` list that maps the context
+payload to the local payload shape. The recommended NOPIMS defaults above fit
+volumes with maximum shape around `[300, 300, 1501]`.
 
 Halo-aware on-the-fly attribute defaults:
 
@@ -104,6 +109,21 @@ data:
   local_attribute_halo: [16, 16, 64]
   context_attribute_halo: [8, 8, 16]
   require_full_halo_inside_volume: true
+```
+
+The required source crop sizes are `[160, 160, 256]` for local attributes and
+`[288, 288, 640]` for context attributes:
+
+```text
+local_crop_size + 2 * local_attribute_halo
+context_crop_size + 2 * context_attribute_halo * context_downsample
+```
+
+Context can be disabled by setting:
+
+```yaml
+data:
+  use_context: false
 ```
 
 ## 5. Attributes and Normalization
@@ -171,7 +191,7 @@ NOPIMS 3D seismic surveys
   -> explicit path-list of source-seismic .npy volumes
   -> sidecar robust normalization stats per listed volume
   -> survey-wise robust normalization
-  -> on-the-fly MVP attribute generation from local/context crops
+  -> halo-aware on-the-fly MVP attribute generation from local/context crops
   -> strict 3D attribute-set MAE pretraining
   -> external-data dense adaptation
   -> F3 few-label fine-tuning

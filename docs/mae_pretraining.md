@@ -40,12 +40,26 @@ valid attributes withheld from the encoder input. When context is enabled, the
 batch may include `context: [B, C, X, Y, Z]` and
 `context_valid_mask: [B, X, Y, Z]`.
 
-For the default config, local crops are `[128, 128, 128]`, patch size is
+For the default config, local crops are `[128, 128, 128]`, context crops are
+`[256, 256, 512]`, context downsampling is `[2, 2, 4]`, patch size is
 `[8, 8, 8]`, and the token grid is `[16, 16, 16]`.
 On-the-fly targets are generated from halo-expanded compute crops and then
 center-trimmed back to the payload shape before attribute subset sampling and
 MAE spatial masking. The default local attribute halo is `[16, 16, 64]`; the
 default context halo is `[8, 8, 16]` on the low-resolution context grid.
+For NOPIMS volumes with maximum shape around `[300, 300, 1501]`, the
+recommended context source requirement is `[288, 288, 640]`:
+
+```text
+[256, 256, 512] + 2 * [8, 8, 16] * [2, 2, 4]
+```
+
+Context can be disabled for local-only experiments with:
+
+```yaml
+data:
+  use_context: false
+```
 
 ## Dataset Sampling
 

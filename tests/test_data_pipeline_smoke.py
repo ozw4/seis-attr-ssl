@@ -87,6 +87,7 @@ def test_synthetic_nopims_data_pipeline_smoke(tmp_path: Path) -> None:  # noqa: 
 		local_crop_size_xyz=LOCAL_SIZE_XYZ,
 		context_crop_size_xyz=CONTEXT_SIZE_XYZ,
 		context_downsample=CONTEXT_DOWNSAMPLE,
+		require_full_halo_inside_volume=False,
 		min_input_attributes=4,
 		max_input_attributes=6,
 		seed=17,
