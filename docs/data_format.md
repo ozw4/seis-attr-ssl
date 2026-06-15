@@ -4,17 +4,20 @@ MVP pretraining data lives under `/home/dcuser/data/NOPIMS/` and consists of
 approximately 100 NOPIMS-derived 3D surveys. F3 is not pretraining data; it is
 reserved for fine-tuning and held-out evaluation.
 
-Source volumes are dip-steered median filtered seismic stored as `.npy` memmaps
-read with `np.load(path, mmap_mode="r")`. The grid order is `[x, y, z]`, so
-NumPy volumes use shape `[X, Y, Z]`.
+Source volumes are listed explicitly in the NOPIMS path-list file and stored as
+`.npy` memmaps read with `np.load(path, mmap_mode="r")`. Relative path-list
+entries are resolved against `paths.nopims_root`. The grid order is
+`[x, y, z]`, so NumPy volumes use shape `[X, Y, Z]`.
 
 Default MVP data geometry:
 
 ```yaml
 grid_order: [x, y, z]
 volume_format: npy_memmap
-base_seismic_kind: dip_steered_median_filtered
 attribute_mode: on_the_fly
+manifest_source: explicit_path_list
+manifest.input_path_list: /home/dcuser/data/NOPIMS/train_npy_paths.txt
+manifest.normalization_stats_suffix: .normalization_stats.json
 local_crop_size: [128, 128, 128]
 context_crop_size: [512, 512, 512]
 context_downsample: 4

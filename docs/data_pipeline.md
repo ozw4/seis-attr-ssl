@@ -4,28 +4,35 @@ This page records the data contract for NOPIMS source-seismic pretraining.
 F3 is not used for pretraining; it is reserved for few-label fine-tuning and
 held-out evaluation.
 
-## Directory Structure
+## Path List Input
 
-NOPIMS pretraining input is a survey directory tree containing dip-steered
-median filtered source seismic `.npy` volumes and survey-wise robust
-normalization stats:
+NOPIMS pretraining input is controlled by an explicit text file of source
+seismic `.npy` paths. Only files listed in this path list are used for
+pretraining.
 
 ```text
-/home/dcuser/data/NOPIMS/
-  survey_001/
-    seismic/
-      dip_steered_median_filtered.npy
-    normalization_stats.json
-  survey_002/
-    seismic/
-      dip_steered_median_filtered.npy
-    normalization_stats.json
+# One .npy path per line.
+# Empty lines and full-line comments are ignored.
+/home/dcuser/data/NOPIMS/survey_001/seismic/base.npy
+survey_002/seismic/base.npy
 ```
 
-The default manifest scanner writes base-seismic manifest entries. The
-pretraining dataset then generates MVP attributes on the fly from local and
-context crops. Precomputed MVP 10-attribute volumes are not required for the
-MVP path.
+Relative paths are resolved against `paths.nopims_root`. The manifest builder
+does not select volumes by `dip`, `median`, or `filtered` filename hints in the
+MVP path-list workflow. Each manifest entry records one listed source volume,
+and `survey_id` is generated deterministically from the relative path, for
+example
+`survey_a/seismic/base.npy -> survey_a__seismic__base`.
+
+Each source volume has a sidecar robust-normalization stats file next to the
+volume:
+
+```text
+volume.npy -> volume.normalization_stats.json
+```
+
+The pretraining dataset generates MVP attributes on the fly from local and
+context crops. Precomputed MVP 10-attribute volumes are not required.
 
 ## Volume Contract
 
@@ -90,10 +97,16 @@ Build a NOPIMS manifest JSON with:
 python proc/build_nopims_manifests.py --config proc/configs/build_nopims_manifests.yaml
 ```
 
-The builder scans the configured NOPIMS root, writes a JSON list of survey
-manifests, and stores source seismic metadata. In code, use
-`build_nopims_base_seismic_manifests(...)` to scan and serialize, then
-`read_manifest_json(...)` to reload the manifest list for datasets.
+The default config reads `manifest.input_path_list`, writes the manifest JSON
+under `manifest.output_dir`, and stores source seismic metadata for each listed
+volume. Use `read_manifest_json(...)` to reload the manifest list for datasets.
+
+After building the manifest, compute any missing sidecar stats for its entries:
+
+```bash
+python proc/prepare_nopims_normalization_stats.py \
+  --config proc/configs/mvp_prepare_nopims_stats.yaml
+```
 
 ## Pretraining Sample Contract
 

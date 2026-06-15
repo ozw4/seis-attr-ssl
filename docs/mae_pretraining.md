@@ -7,12 +7,14 @@ This page documents the Stage 1 strict 3D attribute-set MAE pretraining path.
 Stage 1 uses external NOPIMS data only. F3 is not used for pretraining; it is
 reserved for few-label fine-tuning and held-out evaluation.
 
-The MVP pretraining input and target set is the seismic attribute registry in
-`proc/configs/mvp_mae.yaml`, generated on the fly from dip-steered median
-filtered source seismic `.npy` memmaps. External structural prediction
-attributes, such as fault, channel, salt, or horizon probability volumes, are
-not pretraining inputs or targets. The masked inpainting baseline is not part of
-the MVP.
+The MVP pretraining input set is controlled by the explicit path list used to
+build the NOPIMS manifest. Source seismic `.npy` memmaps listed there are the
+only volumes used for Stage 1. The target set is the seismic attribute registry
+in `proc/configs/mvp_mae.yaml`, generated on the fly during dataset sampling.
+Precomputed 10-attribute `.npy` volumes are not required. External structural
+prediction attributes, such as fault, channel, salt, or horizon probability
+volumes, are not pretraining inputs or targets. The masked inpainting baseline
+is not part of the MVP.
 
 ## Batch Contract
 
@@ -90,16 +92,37 @@ attributes.
 
 ## Commands
 
-Build NOPIMS manifests:
+Build the manifest from the explicit path list:
 
 ```bash
-python proc/build_nopims_manifests.py --config proc/configs/build_nopims_manifests.yaml
+python proc/build_nopims_manifests.py \
+  --config proc/configs/build_nopims_manifests.yaml
 ```
 
-Validate the MAE config without training:
+Compute missing sidecar normalization stats for manifest entries:
 
 ```bash
-python proc/train_mae.py --dry-run
+python proc/prepare_nopims_normalization_stats.py \
+  --config proc/configs/mvp_prepare_nopims_stats.yaml
+```
+
+Smoke-test MAE pretraining:
+
+```bash
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae.yaml \
+  --device cuda \
+  --max-steps 2 \
+  --output-root runs/smoke_mae
+```
+
+Run full MAE pretraining:
+
+```bash
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae.yaml \
+  --device cuda \
+  --output-root runs/mae_nopims
 ```
 
 The dry-run test module is a local developer check. Required review validation
@@ -108,13 +131,8 @@ uses:
 ```bash
 python -m compileall -q src proc tests
 python -m ruff check .
-pytest -q --ignore=tests/test_proc_dry_run.py
-```
-
-Run Stage 1 pretraining:
-
-```bash
-python proc/train_mae.py --config proc/configs/mvp_mae.yaml --device cuda
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TORCH_NUM_THREADS=1 \
+  pytest -q --ignore=tests/test_proc_dry_run.py
 ```
 
 Run the implemented synthetic one-step smoke test:

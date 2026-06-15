@@ -2,7 +2,7 @@
 
 MVP attributes are generated on the fly during dataset sampling from
 survey-wise robust normalized source seismic crops. The source seismic is the
-dip-steered median filtered `.npy` memmap recorded in the base-seismic manifest.
+`.npy` memmap recorded in the path-list-derived base-seismic manifest.
 
 The local crop is `[128, 128, 128]`. Attribute generation reads a larger
 compute crop and returns the unchanged payload crop shape:

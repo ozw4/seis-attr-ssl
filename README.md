@@ -24,14 +24,26 @@ part of the required review validation command set.
 ## Stage 1 MAE Pretraining
 
 ```bash
-python proc/build_nopims_manifests.py --config proc/configs/build_nopims_manifests.yaml
-python proc/train_mae.py --dry-run
-python proc/train_mae.py --config proc/configs/mvp_mae.yaml --device cuda
+python proc/build_nopims_manifests.py \
+  --config proc/configs/build_nopims_manifests.yaml
+python proc/prepare_nopims_normalization_stats.py \
+  --config proc/configs/mvp_prepare_nopims_stats.yaml
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae.yaml \
+  --device cuda \
+  --max-steps 2 \
+  --output-root runs/smoke_mae
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae.yaml \
+  --device cuda \
+  --output-root runs/mae_nopims
 ```
 
 Stage 1 uses external NOPIMS data only; F3 is reserved for fine-tuning and
-evaluation. The default MVP path reads dip-steered median filtered `.npy`
-memmap source seismic under `/home/dcuser/data/NOPIMS/` and generates MVP
-attributes on the fly during sampling; precomputed attribute volumes are not
-required. See [docs/mae_pretraining.md](docs/mae_pretraining.md) for the batch
-contract, model shape contract, checkpoint contents, and smoke-test command.
+evaluation. The default MVP path builds its manifest from an explicit text file
+of source-seismic `.npy` paths. Relative paths are resolved against
+`paths.nopims_root`, only listed files are used, sidecar stats are stored as
+`volume.normalization_stats.json`, and MVP attributes are generated on the fly
+during sampling. Precomputed attribute volumes are not required. See
+[docs/mae_pretraining.md](docs/mae_pretraining.md) for the batch contract, model
+shape contract, checkpoint contents, and smoke-test command.
