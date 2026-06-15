@@ -54,10 +54,10 @@ base seismic compute crop + halo
 Spatial masking is applied only after attribute generation and center trimming.
 Attributes must not be generated from spatially masked base seismic.
 
-Training samples require full halo coverage inside the volume whenever
-possible. Small synthetic test volumes may fall back to ordinary payload crop
-sampling when the full margin cannot fit; NOPIMS production pretraining assumes
-the full local and context halo fit inside each sampled volume.
+With `data.require_full_halo_inside_volume: true`, training samples require full
+local and context halo coverage inside the source volume, and undersized volumes
+are rejected. Set it to `false` only for small synthetic tests or experiments
+that intentionally permit padded halo reads.
 
 Set `data.use_context: false` to skip context crop reading and context attribute
 generation for experiments that only use the local payload.

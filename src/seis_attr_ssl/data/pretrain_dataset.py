@@ -55,8 +55,8 @@ class NopimsAttributePretrainDataset:
 		local_crop_size_xyz: Sequence[int] = (128, 128, 128),
 		local_attribute_halo_xyz: Sequence[int] = (16, 16, 64),
 		require_full_halo_inside_volume: bool = True,  # noqa: FBT001, FBT002
-		context_crop_size_xyz: Sequence[int] = (512, 512, 512),
-		context_downsample: int | Sequence[int] = 4,
+		context_crop_size_xyz: Sequence[int] = (256, 256, 512),
+		context_downsample: int | Sequence[int] = (2, 2, 4),
 		context_attribute_halo_xyz: Sequence[int] = (8, 8, 16),
 		use_context: bool = True,  # noqa: FBT001, FBT002
 		patch_size_xyz: Sequence[int] = (8, 8, 8),
@@ -185,6 +185,15 @@ class NopimsAttributePretrainDataset:
 		model = _require_config_mapping(config, 'model')
 		masking = _require_config_mapping(config, 'masking')
 		train = _require_config_mapping(config, 'train')
+		context_kwargs: dict[str, object] = {}
+		if 'context_crop_size' in data:
+			context_kwargs['context_crop_size_xyz'] = data['context_crop_size']
+		if 'context_downsample' in data:
+			context_kwargs['context_downsample'] = data['context_downsample']
+		if 'context_attribute_halo' in data:
+			context_kwargs['context_attribute_halo_xyz'] = data[
+				'context_attribute_halo'
+			]
 
 		return cls(
 			manifests,
@@ -192,9 +201,6 @@ class NopimsAttributePretrainDataset:
 			local_crop_size_xyz=data['local_crop_size'],
 			local_attribute_halo_xyz=data['local_attribute_halo'],
 			require_full_halo_inside_volume=data['require_full_halo_inside_volume'],
-			context_crop_size_xyz=data['context_crop_size'],
-			context_downsample=data['context_downsample'],
-			context_attribute_halo_xyz=data['context_attribute_halo'],
 			use_context=data['use_context'],
 			patch_size_xyz=model['patch_size'],
 			spatial_mask_ratio=masking['spatial_mask_ratio'],
@@ -206,6 +212,7 @@ class NopimsAttributePretrainDataset:
 			group_dropout_prob=masking['group_dropout_prob'],
 			seed=train['seed'],
 			samples_per_epoch=samples_per_epoch,
+			**context_kwargs,
 		)
 
 	def __len__(self) -> int:

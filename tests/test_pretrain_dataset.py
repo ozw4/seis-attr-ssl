@@ -375,6 +375,43 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.seed == 42
 
 
+def test_pretrain_dataset_from_config_allows_local_only_without_context_geometry(
+	tmp_path: Path,
+) -> None:
+	cfg = load_config(Path('proc/configs/mvp_mae.yaml'))
+	data = cfg['data']
+	data['use_context'] = False
+	del data['context_crop_size']
+	del data['context_downsample']
+	del data['context_attribute_halo']
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(300, 300, 1501),
+	)
+
+	dataset = NopimsAttributePretrainDataset.from_config([manifest], cfg)
+
+	assert dataset.use_context is False
+	assert dataset.required_full_halo_size_xyz == (160, 160, 256)
+
+
+def test_pretrain_dataset_default_context_geometry_fits_nopims_shape(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(300, 300, 1501),
+	)
+
+	dataset = NopimsAttributePretrainDataset([manifest])
+
+	assert dataset.context_crop_size_xyz == (256, 256, 512)
+	assert dataset.context_downsample == (2, 2, 4)
+	assert dataset.required_full_halo_size_xyz == (288, 288, 640)
+
+
 def test_pretrain_dataset_accepts_nopims_full_halo_geometry(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
