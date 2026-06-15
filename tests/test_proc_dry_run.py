@@ -9,6 +9,7 @@ from tests.helpers import run_python_proc
 PROC_SCRIPTS = (
 	Path('proc/build_nopims_manifests.py'),
 	Path('proc/prepare_normalization_stats.py'),
+	Path('proc/prepare_nopims_normalization_stats.py'),
 	Path('proc/generate_attributes.py'),
 	Path('proc/train_mae.py'),
 	Path('proc/train_dense_adapt.py'),
@@ -63,3 +64,114 @@ def test_train_mae_dry_run_validates_cli_overrides(
 	assert result.returncode != 0
 	assert expected_stderr in result.stderr
 	assert 'stage:' not in result.stdout
+
+
+def test_prepare_nopims_normalization_stats_dry_run_missing_manifest_is_actionable(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'mae.yaml'
+	config_path.write_text(
+		"""
+project:
+  name: SeisAttrSSL
+  package: seis_attr_ssl
+paths:
+  nopims_root: /tmp/NOPIMS/
+  output_root: runs
+manifests:
+  train: /tmp/NOPIMS/manifests/missing.json
+data:
+  grid_order: [x, y, z]
+  volume_format: npy_memmap
+  base_seismic_kind: dip_steered_median_filtered
+  attribute_mode: on_the_fly
+  local_crop_size: [128, 128, 128]
+  context_crop_size: [512, 512, 512]
+  context_downsample: 4
+  local_attribute_halo: [16, 16, 64]
+  context_attribute_halo: [8, 8, 16]
+  require_full_halo_inside_volume: true
+attributes:
+  names:
+    - amplitude_norm
+    - phase_sin
+    - phase_cos
+    - instantaneous_frequency
+    - spectral_low_ratio
+    - spectral_mid_ratio
+    - spectral_high_ratio
+    - coherence
+    - glcm_contrast
+    - glcm_homogeneity
+  groups:
+    amplitude_norm: waveform
+    phase_sin: phase
+    phase_cos: phase
+    instantaneous_frequency: frequency
+    spectral_low_ratio: spectral
+    spectral_mid_ratio: spectral
+    spectral_high_ratio: spectral
+    coherence: discontinuity
+    glcm_contrast: texture
+    glcm_homogeneity: texture
+normalization:
+  pre_attribute:
+    clipping_percentiles: [0.5, 99.5]
+    center: median
+    scale: iqr
+    epsilon: 1.0e-6
+    smooth_time_depth_trend_correction: false
+    trace_wise_agc: false
+    patch_wise_zscore: false
+stage: pretrain_mae
+masking:
+  spatial_mask_ratio: 0.75
+  spatial_mask_mode: block
+  block_size_tokens: [2, 2, 2]
+  min_input_attributes: 4
+  max_input_attributes: 10
+  attribute_dropout_prob: 0.30
+  group_dropout_prob: 0.20
+model:
+  patch_size: [8, 8, 8]
+train:
+  batch_size: 1
+""",
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/prepare_nopims_normalization_stats.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'normalization_stats.manifest_exists: false' in result.stdout
+	assert 'normalization_stats.compute: skipped' in result.stdout
+	assert 'proc/build_nopims_manifests.py' in result.stdout
+	assert 'Traceback' not in result.stderr
+
+
+def test_prepare_nopims_normalization_stats_missing_manifest_fails_actionably(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'mae.yaml'
+	config_path.write_text(
+		Path('proc/configs/mvp_mae.yaml').read_text(encoding='utf-8').replace(
+			'/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json',
+			str(tmp_path / 'missing.json'),
+		),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/prepare_nopims_normalization_stats.py'),
+		'--config',
+		config_path,
+	)
+
+	assert result.returncode != 0
+	assert 'manifests.train does not exist' in result.stderr
+	assert 'proc/build_nopims_manifests.py' in result.stderr

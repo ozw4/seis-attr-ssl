@@ -49,16 +49,16 @@ class NormalizationTarget:
 		return self.base_seismic.normalization_stats_path
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915
 	"""Compute missing NOPIMS normalization stats sidecars."""
 	args = _parse_args()
 	config = validate_config(load_config(args.config))
 	manifest_path = _manifest_path(config)
 	normalization = _required_mapping(config, 'normalization')
 	pre_attribute = _required_mapping(normalization, 'pre_attribute')
-	stats_cfg = _required_mapping(config, 'normalization_stats')
+	stats_cfg = _optional_mapping(config, 'normalization_stats')
 	max_samples = _optional_positive_int(stats_cfg, 'max_samples')
-	seed = _required_int(stats_cfg, 'seed')
+	seed = _optional_int(stats_cfg, 'seed', default=42)
 	clip_low, clip_high = _required_percentiles(pre_attribute)
 	eps = _required_float(pre_attribute, 'epsilon')
 
@@ -72,7 +72,10 @@ def main() -> None:
 			print(f'normalization_stats.seed: {seed}')
 			print(f'normalization_stats.overwrite: {str(args.overwrite).lower()}')
 			print('normalization_stats.compute: skipped')
-			print(f'normalization_stats.message: manifest does not exist: {manifest_path}')
+			print(
+				'normalization_stats.message: '
+				f'manifest does not exist: {manifest_path}'
+			)
 			print(MANIFEST_BUILD_HINT)
 			return
 		msg = f'manifests.train does not exist: {manifest_path}. {MANIFEST_BUILD_HINT}'
@@ -183,6 +186,17 @@ def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, An
 	return value
 
 
+def _optional_mapping(
+	parent: Mapping[str, object],
+	key: str,
+) -> Mapping[str, object]:
+	value = parent.get(key, {})
+	if not isinstance(value, Mapping):
+		msg = f'{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
 def _required_str(parent: Mapping[str, object], key: str) -> str:
 	value = parent.get(key)
 	if not isinstance(value, str) or not value:
@@ -191,8 +205,13 @@ def _required_str(parent: Mapping[str, object], key: str) -> str:
 	return value
 
 
-def _required_int(parent: Mapping[str, object], key: str) -> int:
-	value = parent.get(key)
+def _optional_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: int,
+) -> int:
+	value = parent.get(key, default)
 	if isinstance(value, bool) or not isinstance(value, int):
 		msg = f'{key} must be an integer; got {value!r}'
 		raise TypeError(msg)
