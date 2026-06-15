@@ -33,7 +33,7 @@ def main() -> None:
 	args = parse_config_args(
 		'Build NOPIMS manifest files from configured seismic volumes.',
 		DEFAULT_CONFIG,
-	)
+	)/
 	config = validate_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	manifest_cfg = _required_mapping(config, 'manifest')
