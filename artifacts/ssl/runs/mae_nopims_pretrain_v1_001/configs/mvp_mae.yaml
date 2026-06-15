@@ -19,10 +19,13 @@ data:
   - 128
   - 128
   context_crop_size:
+  - 256
+  - 256
   - 512
-  - 512
-  - 512
-  context_downsample: 4
+  context_downsample:
+  - 2
+  - 2
+  - 4
   local_attribute_halo:
   - 16
   - 16
