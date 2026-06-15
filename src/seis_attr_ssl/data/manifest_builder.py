@@ -7,7 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
+from seis_attr_ssl.data.path_list import (
+	make_survey_id_from_path,
+	resolve_npy_path_list,
+)
 from seis_attr_ssl.data.schema import (
+	BASE_SEISMIC_DTYPE_FLOAT32,
 	BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
 	GRID_ORDER_XYZ,
 	AttributeVolumeRecord,
@@ -86,6 +91,25 @@ def build_nopims_base_seismic_manifests(  # noqa: PLR0913
 		base_seismic_kind=base_seismic_kind,
 		base_seismic_name_hints=base_seismic_name_hints,
 		normalization_stats_name=normalization_stats_name,
+	)
+	output_path.parent.mkdir(parents=True, exist_ok=True)
+	write_manifest_json(result.manifests, output_path)
+	return result.manifests
+
+
+def build_nopims_base_seismic_manifests_from_path_list(
+	nopims_root: Path,
+	output_path: Path,
+	input_path_list: Path,
+	base_seismic_kind: str = BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
+	normalization_stats_suffix: str = '.normalization_stats.json',
+) -> list[SurveyManifest]:
+	"""Build NOPIMS base seismic manifests from an explicit `.npy` path-list."""
+	result = scan_nopims_base_seismic_manifests_from_path_list(
+		nopims_root=nopims_root,
+		input_path_list=input_path_list,
+		base_seismic_kind=base_seismic_kind,
+		normalization_stats_suffix=normalization_stats_suffix,
 	)
 	output_path.parent.mkdir(parents=True, exist_ok=True)
 	write_manifest_json(result.manifests, output_path)
@@ -219,6 +243,64 @@ def scan_nopims_base_seismic_manifests(
 	)
 
 
+def scan_nopims_base_seismic_manifests_from_path_list(
+	nopims_root: Path,
+	input_path_list: Path,
+	base_seismic_kind: str = BASE_SEISMIC_KIND_DIP_STEERED_MEDIAN_FILTERED,
+	normalization_stats_suffix: str = '.normalization_stats.json',
+) -> ManifestBuildResult:
+	"""Build base seismic manifests from a user-maintained `.npy` path-list."""
+	root = Path(nopims_root)
+	paths = resolve_npy_path_list(input_path_list, root)
+
+	manifests: list[SurveyManifest] = []
+	survey_ids: dict[str, Path] = {}
+	for path in paths:
+		survey_id = make_survey_id_from_path(path, root)
+		if survey_id in survey_ids:
+			msg = (
+				f'duplicate generated survey_id {survey_id!r}: '
+				f'{survey_ids[survey_id]} and {path}'
+			)
+			raise ValueError(msg)
+		survey_ids[survey_id] = path
+
+		info = inspect_npy_volume(path)
+		if info.dtype != BASE_SEISMIC_DTYPE_FLOAT32:
+			msg = (
+				f'base seismic dtype must be {BASE_SEISMIC_DTYPE_FLOAT32!r}; '
+				f'got {info.dtype!r}: {path}'
+			)
+			raise ValueError(msg)
+
+		record = BaseSeismicVolumeRecord(
+			survey_id=survey_id,
+			path=path,
+			kind=base_seismic_kind,
+			shape_xyz=info.shape_xyz,
+			dtype=info.dtype,
+			grid_order=GRID_ORDER_XYZ,
+			normalization_stats_path=_normalization_stats_path(
+				path,
+				normalization_stats_suffix,
+			),
+		)
+		manifest = SurveyManifest(
+			survey_id=survey_id,
+			root=path.parent,
+			attribute_volumes={},
+			shape_xyz=record.shape_xyz,
+			base_seismic=record,
+		)
+		manifest.validate_consistent_shapes()
+		manifests.append(manifest)
+
+	return ManifestBuildResult(
+		manifests=manifests,
+		unknown_attribute_counts={},
+	)
+
+
 def summarize_manifests(
 	manifests: list[SurveyManifest],
 	registry: AttributeRegistry = MVP_ATTRIBUTE_REGISTRY,
@@ -276,6 +358,13 @@ def _matches_base_seismic_hints(relative_path: Path, hints: tuple[str, ...]) -> 
 	return all(hint in text for hint in hints)
 
 
+def _normalization_stats_path(path: Path, suffix: str) -> Path:
+	if not suffix.startswith('.'):
+		msg = f'normalization_stats_suffix must start with ".": {suffix!r}'
+		raise ValueError(msg)
+	return path.with_suffix(suffix)
+
+
 def _build_survey_manifest(
 	survey_id: str,
 	survey_root: Path,
@@ -312,8 +401,10 @@ __all__ = [
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'build_nopims_base_seismic_manifests',
+	'build_nopims_base_seismic_manifests_from_path_list',
 	'build_nopims_manifests',
 	'scan_nopims_base_seismic_manifests',
+	'scan_nopims_base_seismic_manifests_from_path_list',
 	'scan_nopims_manifests',
 	'summarize_manifests',
 ]

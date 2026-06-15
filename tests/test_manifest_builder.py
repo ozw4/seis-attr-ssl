@@ -10,9 +10,11 @@ from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config import load_config
 from seis_attr_ssl.data import (
 	build_nopims_base_seismic_manifests,
+	build_nopims_base_seismic_manifests_from_path_list,
 	build_nopims_manifests,
 	read_manifest_json,
 	scan_nopims_base_seismic_manifests,
+	scan_nopims_base_seismic_manifests_from_path_list,
 	scan_nopims_manifests,
 )
 from tests.helpers import run_python_proc
@@ -52,6 +54,11 @@ def _write_stats(root: Path, source_path: Path) -> Path:
 		),
 		encoding='utf-8',
 	)
+	return path
+
+
+def _write_path_list(path: Path, entries: list[str]) -> Path:
+	path.write_text('\n'.join(entries), encoding='utf-8')
 	return path
 
 
@@ -161,6 +168,138 @@ def test_build_base_seismic_manifests_writes_source_manifest(tmp_path: Path) -> 
 	assert loaded[0].missing_attributes() == ()
 
 
+def test_build_base_seismic_manifests_from_path_list_writes_ordered_manifest(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	first_path = _write_volume(nopims_root, 'survey_b', 'seismic/base.npy')
+	second_path = _write_volume(nopims_root, 'survey_a', 'seismic/base.npy')
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		[
+			'# One .npy path per line.',
+			'',
+			str(first_path),
+			'survey_a/seismic/base.npy',
+		],
+	)
+	output_path = tmp_path / 'manifests' / 'nopims_base_seismic_manifests.json'
+
+	manifests = build_nopims_base_seismic_manifests_from_path_list(
+		nopims_root=nopims_root,
+		output_path=output_path,
+		input_path_list=input_path_list,
+	)
+
+	assert output_path.is_file()
+	loaded = read_manifest_json(output_path)
+	assert loaded == manifests
+	assert [manifest.survey_id for manifest in loaded] == [
+		'survey_b__seismic__base',
+		'survey_a__seismic__base',
+	]
+	base_seismic_paths = [
+		manifest.base_seismic.path for manifest in loaded if manifest.base_seismic
+	]
+	assert base_seismic_paths == [first_path, second_path]
+	for manifest in loaded:
+		assert manifest.base_seismic is not None
+		assert manifest.base_seismic.kind == 'dip_steered_median_filtered'
+		assert manifest.base_seismic.grid_order == ('x', 'y', 'z')
+		assert manifest.base_seismic.dtype == 'float32'
+		assert manifest.base_seismic.normalization_stats_path == (
+			manifest.base_seismic.path.with_suffix('.normalization_stats.json')
+		)
+		assert manifest.attribute_volumes == {}
+
+
+def test_base_seismic_path_list_raises_for_duplicate_paths(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	seismic_path = _write_volume(nopims_root, 'survey_a', 'seismic/base.npy')
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		[
+			str(seismic_path),
+			'survey_a/seismic/base.npy',
+		],
+	)
+
+	with pytest.raises(ValueError, match='duplicate path-list entry'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)
+
+
+def test_base_seismic_path_list_raises_for_duplicate_survey_ids(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	_write_volume(nopims_root, 'survey_a', 'seismic/base.npy')
+	_write_volume(nopims_root, 'survey_a__seismic', 'base.npy')
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		[
+			'survey_a/seismic/base.npy',
+			'survey_a__seismic/base.npy',
+		],
+	)
+
+	with pytest.raises(ValueError, match='duplicate generated survey_id'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)
+
+
+def test_base_seismic_path_list_raises_for_missing_file(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		['missing/base.npy'],
+	)
+
+	with pytest.raises(FileNotFoundError, match='does not exist'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)
+
+
+def test_base_seismic_path_list_raises_for_non_npy_file(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	text_path = nopims_root / 'survey_a' / 'base.txt'
+	text_path.parent.mkdir(parents=True, exist_ok=True)
+	text_path.write_text('not npy', encoding='utf-8')
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		['survey_a/base.txt'],
+	)
+
+	with pytest.raises(ValueError, match=r'\.npy suffix'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)
+
+
+def test_base_seismic_path_list_raises_for_non_3d_source(tmp_path: Path) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	path = nopims_root / 'survey_a' / 'base.npy'
+	path.parent.mkdir(parents=True, exist_ok=True)
+	np.save(path, np.zeros((4, 5), dtype='float32'))
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		['survey_a/base.npy'],
+	)
+
+	with pytest.raises(ValueError, match='3D'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)
+
+
 def test_base_seismic_scan_raises_for_duplicate_survey_source(
 	tmp_path: Path,
 ) -> None:
@@ -177,12 +316,16 @@ def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	seismic_path = _write_volume(
 		nopims_root,
 		'survey_a',
-		'seismic/dip_median_filtered.npy',
+		'seismic/base.npy',
 	)
-	_write_stats(nopims_root / 'survey_a', seismic_path)
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		[str(seismic_path)],
+	)
 	output_dir = tmp_path / 'manifests'
 	config = load_config(PROJECT_ROOT / 'proc/configs/build_nopims_manifests.yaml')
 	config['paths']['nopims_root'] = str(nopims_root)
+	config['manifest']['input_path_list'] = str(input_path_list)
 	config['manifest']['output_dir'] = str(output_dir)
 	config_path = tmp_path / 'build_nopims_manifests.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
@@ -196,8 +339,22 @@ def test_build_nopims_manifests_cli_writes_json(tmp_path: Path) -> None:
 	assert result.returncode == 0, result.stderr
 	output_path = output_dir / 'nopims_base_seismic_manifests.json'
 	assert output_path.is_file()
-	assert read_manifest_json(output_path)[0].survey_id == 'survey_a'
+	assert read_manifest_json(output_path)[0].survey_id == 'survey_a__seismic__base'
 	assert 'manifest.base_seismic_count: 1' in result.stdout
+
+
+def test_build_nopims_manifests_cli_dry_run_prints_path_list() -> None:
+	result = run_python_proc(
+		Path('proc/build_nopims_manifests.py'),
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert (
+		'manifest.input_path_list: /home/dcuser/data/NOPIMS/train_npy_paths.txt'
+		in result.stdout
+	)
+	assert 'manifest.scan_pattern' not in result.stdout
 
 
 def test_base_seismic_scan_rejects_non_float32_source(tmp_path: Path) -> None:
@@ -212,3 +369,25 @@ def test_base_seismic_scan_rejects_non_float32_source(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='dtype'):
 		scan_nopims_base_seismic_manifests(nopims_root, '**/*.npy')
+
+
+def test_base_seismic_path_list_rejects_non_float32_source(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	_write_volume(
+		nopims_root,
+		'survey_a',
+		'seismic/base.npy',
+		dtype='float64',
+	)
+	input_path_list = _write_path_list(
+		tmp_path / 'train_npy_paths.txt',
+		['survey_a/seismic/base.npy'],
+	)
+
+	with pytest.raises(ValueError, match='dtype'):
+		scan_nopims_base_seismic_manifests_from_path_list(
+			nopims_root,
+			input_path_list,
+		)

@@ -1,9 +1,11 @@
-"""Compute normalization stats for NOPIMS base-seismic manifest entries."""
+"""Compute normalization stats sidecars for NOPIMS manifest volumes."""
 
 from __future__ import annotations
 
+import argparse
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,121 +14,168 @@ if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
 from seis_attr_ssl.config import load_config, validate_config  # noqa: E402
-from seis_attr_ssl.data import SurveyManifest, read_manifest_json  # noqa: E402
 from seis_attr_ssl.data.normalization import (  # noqa: E402
 	compute_normalization_stats,
 	write_normalization_stats,
 )
-from seis_attr_ssl.utils.cli import (  # noqa: E402
-	parse_config_args,
-	print_config_summary,
+from seis_attr_ssl.data.schema import (  # noqa: E402
+	BASE_SEISMIC_DTYPE_FLOAT32,
+	GRID_ORDER_XYZ,
+	BaseSeismicVolumeRecord,
+	SurveyManifest,
+	read_manifest_json,
 )
+from seis_attr_ssl.utils.cli import print_config_summary  # noqa: E402
 
-DEFAULT_CONFIG = Path(__file__).resolve().parent / 'configs' / 'mvp_mae.yaml'
+DEFAULT_CONFIG = (
+	Path(__file__).resolve().parent / 'configs' / 'mvp_prepare_nopims_stats.yaml'
+)
 MANIFEST_BUILD_HINT = (
-	'build the manifest with `python proc/build_nopims_manifests.py --config '
+	'hint: build the manifest with `python proc/build_nopims_manifests.py --config '
 	'proc/configs/build_nopims_manifests.yaml`'
 )
 
 
-def main() -> None:
-	"""Compute NOPIMS normalization stats or print a dry-run summary."""
-	args = parse_config_args(
-		'Prepare normalization stats for NOPIMS base-seismic manifests.',
-		DEFAULT_CONFIG,
-	)
+@dataclass(frozen=True)
+class NormalizationTarget:
+	"""Validated manifest target for one sidecar stats file."""
+
+	survey_id: str
+	base_seismic: BaseSeismicVolumeRecord
+
+	@property
+	def output_path(self) -> Path:
+		"""Stats sidecar path from the manifest entry."""
+		return self.base_seismic.normalization_stats_path
+
+
+def main() -> None:  # noqa: PLR0915
+	"""Compute missing NOPIMS normalization stats sidecars."""
+	args = _parse_args()
 	config = validate_config(load_config(args.config))
+	manifest_path = _manifest_path(config)
 	normalization = _required_mapping(config, 'normalization')
 	pre_attribute = _required_mapping(normalization, 'pre_attribute')
-	manifest_path = _manifest_train_path(config)
+	stats_cfg = _optional_mapping(config, 'normalization_stats')
+	max_samples = _optional_positive_int(stats_cfg, 'max_samples')
+	seed = _optional_int(stats_cfg, 'seed', default=42)
 	clip_low, clip_high = _required_percentiles(pre_attribute)
-	max_samples = _optional_positive_int(
-		_optional_mapping(config, 'normalization_stats'),
-		'max_samples',
-	)
-	seed = _optional_int(
-		_optional_mapping(config, 'normalization_stats'),
-		'seed',
-		default=42,
-	)
 	eps = _required_float(pre_attribute, 'epsilon')
 
 	if not manifest_path.is_file():
-		message = _missing_manifest_message(manifest_path)
 		if args.dry_run:
 			print_config_summary(config)
 			print(f'normalization_stats.manifest_path: {manifest_path}')
 			print('normalization_stats.manifest_exists: false')
+			print('normalization_stats.manifest_entries: 0')
+			print(f'normalization_stats.max_samples: {max_samples}')
+			print(f'normalization_stats.seed: {seed}')
+			print(f'normalization_stats.overwrite: {str(args.overwrite).lower()}')
 			print('normalization_stats.compute: skipped')
-			print(f'hint: {MANIFEST_BUILD_HINT}')
+			print(
+				'normalization_stats.message: '
+				f'manifest does not exist: {manifest_path}'
+			)
+			print(MANIFEST_BUILD_HINT)
 			return
-		raise FileNotFoundError(message)
+		msg = f'manifests.train does not exist: {manifest_path}. {MANIFEST_BUILD_HINT}'
+		raise FileNotFoundError(msg)
 
 	manifests = read_manifest_json(manifest_path)
+	targets = [_normalization_target(manifest) for manifest in manifests]
+	existing_count = sum(target.output_path.is_file() for target in targets)
+	missing_count = len(targets) - existing_count
+
 	if args.dry_run:
 		print_config_summary(config)
 		print(f'normalization_stats.manifest_path: {manifest_path}')
 		print('normalization_stats.manifest_exists: true')
-		_print_manifest_counts(manifests)
+		print(f'normalization_stats.manifest_entries: {len(targets)}')
+		print(f'normalization_stats.existing_files: {existing_count}')
+		print(f'normalization_stats.missing_files: {missing_count}')
+		print(f'normalization_stats.max_samples: {max_samples}')
+		print(f'normalization_stats.seed: {seed}')
+		print(f'normalization_stats.overwrite: {str(args.overwrite).lower()}')
 		print('normalization_stats.compute: skipped')
 		return
 
-	for manifest in manifests:
-		if manifest.base_seismic is None:
-			msg = (
-				f'manifest survey {manifest.survey_id!r} is missing '
-				'base seismic metadata'
-			)
-			raise ValueError(msg)
+	written_count = 0
+	skipped_count = 0
+	for target in targets:
+		if target.output_path.is_file() and not args.overwrite:
+			skipped_count += 1
+			continue
 		stats = compute_normalization_stats(
-			manifest.root / manifest.base_seismic.path,
-			survey_id=manifest.survey_id,
-			grid_order=manifest.grid_order,
+			target.base_seismic.path,
+			survey_id=target.survey_id,
+			grid_order=target.base_seismic.grid_order,
 			clip_low_percentile=clip_low,
 			clip_high_percentile=clip_high,
 			max_samples=max_samples,
 			seed=seed,
 			eps=eps,
 		)
-		output_path = manifest.root / manifest.base_seismic.normalization_stats_path
-		write_normalization_stats(stats, output_path)
-		print(f'wrote normalization stats: {output_path}')
+		write_normalization_stats(stats, target.output_path)
+		written_count += 1
+
+	print(f'normalization_stats.manifest_path: {manifest_path}')
+	print(f'normalization_stats.manifest_entries: {len(targets)}')
+	print(f'normalization_stats.written_files: {written_count}')
+	print(f'normalization_stats.skipped_existing_files: {skipped_count}')
 
 
-def _manifest_train_path(config: Mapping[str, object]) -> Path:
-	manifests = config.get('manifests')
-	if not isinstance(manifests, Mapping):
-		msg = _manifest_path_error('manifests.train is required')
-		raise TypeError(msg)
-	path_value = manifests.get('train')
-	if not isinstance(path_value, str) or not path_value:
-		msg = _manifest_path_error(
-			f'manifests.train must be a non-empty string; got {path_value!r}',
+def _parse_args() -> argparse.Namespace:
+	parser = argparse.ArgumentParser(
+		description='Prepare normalization stats sidecars for NOPIMS manifests.',
+	)
+	parser.add_argument(
+		'--config',
+		type=Path,
+		default=DEFAULT_CONFIG,
+		help='Path to a YAML configuration file.',
+	)
+	parser.add_argument(
+		'--dry-run',
+		action='store_true',
+		help='Validate inputs and print a run summary without writing stats.',
+	)
+	parser.add_argument(
+		'--overwrite',
+		action='store_true',
+		help='Recompute stats files even when sidecars already exist.',
+	)
+	return parser.parse_args()
+
+
+def _manifest_path(config: Mapping[str, object]) -> Path:
+	manifests = _required_mapping(config, 'manifests')
+	return Path(_required_str(manifests, 'train'))
+
+
+def _normalization_target(manifest: SurveyManifest) -> NormalizationTarget:
+	base_seismic = manifest.base_seismic
+	if base_seismic is None:
+		msg = f'manifest {manifest.survey_id!r} has no base_seismic'
+		raise ValueError(msg)
+	if not base_seismic.path.is_file():
+		msg = f'base_seismic.path does not exist: {base_seismic.path}'
+		raise FileNotFoundError(msg)
+	if base_seismic.dtype != BASE_SEISMIC_DTYPE_FLOAT32:
+		msg = (
+			f'base_seismic.dtype must be {BASE_SEISMIC_DTYPE_FLOAT32!r}; '
+			f'got {base_seismic.dtype!r}'
 		)
 		raise ValueError(msg)
-	return Path(path_value)
-
-
-def _manifest_path_error(reason: str) -> str:
-	return f'{reason}. {MANIFEST_BUILD_HINT}.'
-
-
-def _missing_manifest_message(manifest_path: Path) -> str:
-	return _manifest_path_error(f'manifests.train does not exist: {manifest_path}')
-
-
-def _print_manifest_counts(manifests: Sequence[SurveyManifest]) -> None:
-	base_seismic_count = sum(
-		manifest.base_seismic is not None for manifest in manifests
+	if base_seismic.grid_order != GRID_ORDER_XYZ:
+		msg = (
+			f'base_seismic.grid_order must be {list(GRID_ORDER_XYZ)!r}; '
+			f'got {list(base_seismic.grid_order)!r}'
+		)
+		raise ValueError(msg)
+	return NormalizationTarget(
+		survey_id=manifest.survey_id,
+		base_seismic=base_seismic,
 	)
-	stats_existing_count = sum(
-		manifest.base_seismic is not None
-		and (manifest.root / manifest.base_seismic.normalization_stats_path).is_file()
-		for manifest in manifests
-	)
-	print(f'normalization_stats.survey_count: {len(manifests)}')
-	print(f'normalization_stats.base_seismic_count: {base_seismic_count}')
-	print(f'normalization_stats.existing_stats_count: {stats_existing_count}')
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, Any]:
@@ -144,6 +193,14 @@ def _optional_mapping(
 	value = parent.get(key, {})
 	if not isinstance(value, Mapping):
 		msg = f'{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
+def _required_str(parent: Mapping[str, object], key: str) -> str:
+	value = parent.get(key)
+	if not isinstance(value, str) or not value:
+		msg = f'{key} must be a non-empty string; got {value!r}'
 		raise TypeError(msg)
 	return value
 

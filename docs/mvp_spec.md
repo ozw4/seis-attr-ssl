@@ -52,7 +52,8 @@ Pretraining data:
 Data source: NOPIMS collected seismic surveys
 Scale: approximately 100 3D surveys
 Data root: /home/dcuser/data/NOPIMS/
-Base seismic: dip-steered median filtered seismic
+Manifest source: explicit .npy path-list file
+Base seismic: listed source-seismic .npy volumes
 File format: .npy memmap
 Reader: np.load(path, mmap_mode="r")
 Manifest kind: source base seismic manifest
@@ -167,7 +168,8 @@ The main pipeline is:
 
 ```text
 NOPIMS 3D seismic surveys
-  -> dip-steered median filtered seismic
+  -> explicit path-list of source-seismic .npy volumes
+  -> sidecar robust normalization stats per listed volume
   -> survey-wise robust normalization
   -> on-the-fly MVP attribute generation from local/context crops
   -> strict 3D attribute-set MAE pretraining
@@ -204,9 +206,9 @@ epochs or single-process loading.
 
 The default pretraining manifest is a source-seismic manifest such as
 `/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json`.
-Manifest entries point to dip-steered median filtered `.npy` source volumes and
-survey-wise robust normalization stats; they do not need precomputed attribute
-paths.
+Manifest entries point to the `.npy` source volumes from the explicit path list
+and their sidecar robust normalization stats; they do not need precomputed
+attribute paths.
 
 ## 8. F3 Evaluation Protocol
 

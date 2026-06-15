@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
+import pytest
 import yaml
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
@@ -15,6 +17,11 @@ from seis_attr_ssl.training import load_checkpoint
 from tests.helpers import run_python_proc
 
 
+@pytest.mark.heavy
+@pytest.mark.skipif(
+	os.environ.get('SEIS_ATTR_SSL_RUN_HEAVY_TESTS') != '1',
+	reason='heavy subprocess MAE training smoke test',
+)
 def test_train_mae_proc_one_step_cpu_run_writes_checkpoint(tmp_path: Path) -> None:
 	manifest_path = _write_synthetic_manifest(tmp_path / 'survey')
 	config_path = tmp_path / 'mae.yaml'
