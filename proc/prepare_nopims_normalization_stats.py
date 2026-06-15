@@ -30,6 +30,10 @@ from seis_attr_ssl.utils.cli import print_config_summary  # noqa: E402
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parent / 'configs' / 'mvp_prepare_nopims_stats.yaml'
 )
+MANIFEST_BUILD_HINT = (
+	'hint: build the manifest with `python proc/build_nopims_manifests.py --config '
+	'proc/configs/build_nopims_manifests.yaml`'
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,22 @@ def main() -> None:
 	clip_low, clip_high = _required_percentiles(pre_attribute)
 	eps = _required_float(pre_attribute, 'epsilon')
 
+	if not manifest_path.is_file():
+		if args.dry_run:
+			print_config_summary(config)
+			print(f'normalization_stats.manifest_path: {manifest_path}')
+			print('normalization_stats.manifest_exists: false')
+			print('normalization_stats.manifest_entries: 0')
+			print(f'normalization_stats.max_samples: {max_samples}')
+			print(f'normalization_stats.seed: {seed}')
+			print(f'normalization_stats.overwrite: {str(args.overwrite).lower()}')
+			print('normalization_stats.compute: skipped')
+			print(f'normalization_stats.message: manifest does not exist: {manifest_path}')
+			print(MANIFEST_BUILD_HINT)
+			return
+		msg = f'manifests.train does not exist: {manifest_path}. {MANIFEST_BUILD_HINT}'
+		raise FileNotFoundError(msg)
+
 	manifests = read_manifest_json(manifest_path)
 	targets = [_normalization_target(manifest) for manifest in manifests]
 	existing_count = sum(target.output_path.is_file() for target in targets)
@@ -66,6 +86,7 @@ def main() -> None:
 	if args.dry_run:
 		print_config_summary(config)
 		print(f'normalization_stats.manifest_path: {manifest_path}')
+		print('normalization_stats.manifest_exists: true')
 		print(f'normalization_stats.manifest_entries: {len(targets)}')
 		print(f'normalization_stats.existing_files: {existing_count}')
 		print(f'normalization_stats.missing_files: {missing_count}')
