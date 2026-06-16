@@ -1,0 +1,36 @@
+run_id: mae_nopims_pretrain_v1_clean_001
+stage: pretrain_mae
+repo: ozw4/seis-attr-ssl
+git_commit: 4c4953907c6dcbe92dc905f60ac4d2d77669f421
+
+data:
+  nopims_root: /home/dcuser/data/NOPIMS
+  split_source: /workspace/artifacts/ssl/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
+  manifest_source: /workspace/artifacts/ssl/registry/manifests/nopims/pretrain_v1_clean/nopims_base_seismic_manifests.json
+  split_snapshot: inputs/train_npy_paths.txt
+  manifest_snapshot: inputs/nopims_base_seismic_manifests.json
+  n_manifest_entries: 2270
+  excluded_for_small_iqr:
+    - ENO0578137_0_00050_00800
+    - ENO0578137_0_00050_01150
+    - ENO0578137_0_00400_01150
+
+geometry:
+  local_crop_size: [128, 128, 128]
+  local_attribute_halo: [16, 16, 64]
+  use_context: true
+  context_crop_size: [256, 256, 512]
+  context_downsample: [2, 2, 4]
+  context_attribute_halo: [8, 8, 16]
+  require_full_halo_inside_volume: true
+
+config:
+  build_manifest: configs/build_nopims_manifests.yaml
+  prepare_stats: configs/mvp_prepare_nopims_stats.yaml
+  mae: configs/mvp_mae.yaml
+
+output:
+  smoke_checkpoints_dir: checkpoints_smoke/
+  pilot_checkpoints_dir: checkpoints_pilot_1000/
+  checkpoints_dir: checkpoints/
+  log_file: logs/train.log
