@@ -11,7 +11,8 @@ matrix estimates.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, fields
 from numbers import Integral, Real
 from operator import index
 
@@ -129,6 +130,27 @@ class AttributeGenerationResult:
 	attributes: np.ndarray
 	attribute_valid: np.ndarray
 	voxel_valid_mask: np.ndarray
+
+
+def attribute_generation_config_from_mapping(
+	mapping: Mapping[str, object] | None,
+) -> AttributeGenerationConfig:
+	"""Build and validate attribute-generation config from an optional mapping."""
+	if mapping is None:
+		return AttributeGenerationConfig()
+	if not isinstance(mapping, Mapping):
+		msg = f'attribute_generation must be a mapping; got {mapping!r}'
+		raise TypeError(msg)
+
+	field_names = {field.name for field in fields(AttributeGenerationConfig)}
+	unknown_keys = [key for key in mapping if key not in field_names]
+	if unknown_keys:
+		msg = f'unknown attribute_generation settings: {unknown_keys!r}'
+		raise ValueError(msg)
+
+	config = AttributeGenerationConfig(**dict(mapping))
+	config.validate()
+	return config
 
 
 def generate_mvp_attributes(
@@ -711,6 +733,7 @@ __all__ = [
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
 	'NormalizationStats',
+	'attribute_generation_config_from_mapping',
 	'center_trim_attribute_result',
 	'generate_mvp_attribute',
 	'generate_mvp_attributes',

@@ -10,6 +10,8 @@ import numpy as np
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.attributes.on_the_fly import (
+	AttributeGenerationConfig,
+	attribute_generation_config_from_mapping,
 	generate_mvp_attributes_for_payload,
 	normalize_base_seismic,
 )
@@ -69,6 +71,7 @@ class NopimsAttributePretrainDataset:
 		group_dropout_prob: float = 0.0,
 		seed: int = 42,
 		samples_per_epoch: int | None = None,
+		attribute_generation_config: AttributeGenerationConfig | None = None,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -145,6 +148,10 @@ class NopimsAttributePretrainDataset:
 			raise ValueError(msg)
 		self.attribute_dropout_prob = float(attribute_dropout_prob)
 		self.group_dropout_prob = float(group_dropout_prob)
+		self.attribute_generation_config = (
+			attribute_generation_config or AttributeGenerationConfig()
+		)
+		self.attribute_generation_config.validate()
 
 		self.seed = _validate_nonnegative_int(seed, 'seed')
 		self.epoch = 0
@@ -212,6 +219,9 @@ class NopimsAttributePretrainDataset:
 			group_dropout_prob=masking['group_dropout_prob'],
 			seed=train['seed'],
 			samples_per_epoch=samples_per_epoch,
+			attribute_generation_config=attribute_generation_config_from_mapping(
+				config.get('attribute_generation'),
+			),
 			**context_kwargs,
 		)
 
@@ -428,6 +438,7 @@ class NopimsAttributePretrainDataset:
 				normalize_base_seismic(base_crop, stats),
 				payload_slices,
 				valid_mask=compute_valid_mask,
+				config=self.attribute_generation_config,
 			)
 			return result.attributes, result.attribute_valid, result.voxel_valid_mask
 
@@ -477,6 +488,7 @@ class NopimsAttributePretrainDataset:
 				normalized_context,
 				lowres_payload_slices,
 				valid_mask=context_valid_mask,
+				config=self.attribute_generation_config,
 			)
 			ids = np.asarray(input_ids, dtype=np.int64)
 			return (

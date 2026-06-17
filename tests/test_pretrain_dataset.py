@@ -9,6 +9,7 @@ import torch
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config import load_config
 from seis_attr_ssl.data import (
+	AttributeGenerationConfig,
 	AttributeVolumeRecord,
 	BaseSeismicVolumeRecord,
 	CropRequest,
@@ -373,6 +374,83 @@ def test_pretrain_dataset_from_config_wires_masking_values(tmp_path: Path) -> No
 	assert dataset.attribute_dropout_prob == 0.30
 	assert dataset.group_dropout_prob == 0.20
 	assert dataset.seed == 42
+	assert dataset.attribute_generation_config == AttributeGenerationConfig(
+		phase_reflect_pad_z=64,
+		phase_taper_fraction=0.05,
+		instantaneous_frequency_smooth_z=5,
+		instantaneous_frequency_envelope_quantile=0.05,
+		instantaneous_frequency_clip_percentile=99.5,
+		spectral_local_window_z=65,
+		spectral_remove_dc=True,
+	)
+
+
+def test_pretrain_dataset_from_config_parses_attribute_generation(
+	tmp_path: Path,
+) -> None:
+	cfg = load_config(Path('proc/configs/mvp_mae.yaml'))
+	cfg['attribute_generation']['spectral_local_window_z'] = 9
+	cfg['attribute_generation']['spectral_remove_dc'] = False
+	manifest = _manifest_metadata(
+		tmp_path / 'survey-a',
+		MVP_ATTRIBUTE_REGISTRY.names,
+		shape_xyz=(300, 300, 1501),
+	)
+
+	dataset = NopimsAttributePretrainDataset.from_config([manifest], cfg)
+
+	assert dataset.attribute_generation_config.spectral_local_window_z == 9
+	assert dataset.attribute_generation_config.spectral_remove_dc is False
+
+
+def test_pretrain_dataset_attribute_generation_config_changes_spectral_output(
+	tmp_path: Path,
+) -> None:
+	shape_xyz = (4, 4, 64)
+	manifest = _write_base_manifest(tmp_path / 'survey-a', shape_xyz)
+	z = np.arange(shape_xyz[2], dtype=np.float32)
+	half = shape_xyz[2] // 2
+	trace = np.concatenate(
+		[
+			np.sin(2.0 * np.pi * 2.0 * z[:half] / half),
+			np.sin(2.0 * np.pi * 14.0 * z[:half] / half),
+		],
+	).astype(np.float32)
+	base = np.broadcast_to(trace.reshape(1, 1, -1), shape_xyz).copy()
+	np.save(tmp_path / 'survey-a' / 'dip_steered_median_filtered.npy', base)
+
+	default_dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=shape_xyz,
+		local_attribute_halo_xyz=(0, 0, 0),
+		require_full_halo_inside_volume=False,
+		use_context=False,
+		patch_size_xyz=(2, 2, 8),
+		spatial_mask_ratio=0.0,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=1,
+	)
+	custom_dataset = NopimsAttributePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=shape_xyz,
+		local_attribute_halo_xyz=(0, 0, 0),
+		require_full_halo_inside_volume=False,
+		use_context=False,
+		patch_size_xyz=(2, 2, 8),
+		spatial_mask_ratio=0.0,
+		min_input_attributes=2,
+		max_input_attributes=2,
+		seed=1,
+		attribute_generation_config=AttributeGenerationConfig(
+			spectral_local_window_z=3,
+		),
+	)
+
+	default_spectral = default_dataset[0]['target'][4:7]
+	custom_spectral = custom_dataset[0]['target'][4:7]
+
+	assert not np.allclose(default_spectral, custom_spectral)
 
 
 def test_pretrain_dataset_from_config_allows_local_only_without_context_geometry(

@@ -17,12 +17,17 @@ PROC_SCRIPTS = (
 	Path('proc/train_finetune.py'),
 	Path('proc/eval_f3.py'),
 	Path('proc/infer_volume.py'),
+	Path('proc/visualize_attribute_on_the_fly_compare.py'),
 )
 
 DRY_RUN_PROC_SCRIPTS = tuple(
 	script_path
 	for script_path in PROC_SCRIPTS
-	if script_path != Path('proc/filter_nopims_manifest_by_stats_qc.py')
+	if script_path
+	not in {
+		Path('proc/filter_nopims_manifest_by_stats_qc.py'),
+		Path('proc/visualize_attribute_on_the_fly_compare.py'),
+	}
 )
 
 

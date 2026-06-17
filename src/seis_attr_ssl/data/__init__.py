@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 	from seis_attr_ssl.data.attribute_generation import (
 		AttributeGenerationConfig,
 		AttributeGenerationResult,
+		attribute_generation_config_from_mapping,
 		center_trim_attribute_result,
 		generate_mvp_attributes,
 		generate_mvp_attributes_for_payload,
@@ -108,6 +109,7 @@ __all__ = [
 	'SurveyNormalizationStats',
 	'TensorLike',
 	'UnlabeledPretrainingSample',
+	'attribute_generation_config_from_mapping',
 	'build_nopims_base_seismic_manifests',
 	'build_nopims_base_seismic_manifests_from_path_list',
 	'build_nopims_manifests',
@@ -177,6 +179,7 @@ _ATTRIBUTE_SUBSET_EXPORTS = {
 _ATTRIBUTE_GENERATION_EXPORTS = {
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
+	'attribute_generation_config_from_mapping',
 	'center_trim_attribute_result',
 	'generate_mvp_attributes',
 	'generate_mvp_attributes_for_payload',

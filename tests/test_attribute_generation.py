@@ -420,6 +420,8 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	context_calls: list[
 		tuple[tuple[int, int, int], tuple[slice, slice, slice]]
 	] = []
+	attribute_config = AttributeGenerationConfig(spectral_local_window_z=9)
+	received_configs: list[object | None] = []
 
 	def fake_generate_for_payload(
 		amp_norm: np.ndarray,
@@ -428,7 +430,7 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		valid_mask: np.ndarray | None = None,
 		config: object | None = None,
 	) -> AttributeGenerationResult:
-		del config
+		received_configs.append(config)
 		if amp_norm.shape == (36, 36, 132):
 			target_calls.append((amp_norm.shape, payload_slices_xyz))
 			assert payload_slices_xyz == (
@@ -480,6 +482,7 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		min_input_attributes=2,
 		max_input_attributes=2,
 		seed=1,
+		attribute_generation_config=attribute_config,
 	)
 
 	sample = dataset[0]
@@ -497,6 +500,7 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 		),
 	]
 	assert sample['context'].shape == (2, 4, 4, 4)
+	assert received_configs == [attribute_config, attribute_config]
 
 
 def test_pretrain_dataset_spatial_mask_does_not_change_generated_target(
