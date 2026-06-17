@@ -509,6 +509,7 @@ def _phase_attributes(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 	analytic = _hilbert_z(amplitude, config)
 	phase = np.unwrap(np.angle(analytic), axis=2).astype(np.float32, copy=False)
+	envelope = np.abs(analytic).astype(np.float32, copy=False)
 	phase_sin = np.sin(phase).astype(np.float32, copy=False)
 	phase_cos = np.cos(phase).astype(np.float32, copy=False)
 	if amplitude.shape[2] < 2:
@@ -517,6 +518,43 @@ def _phase_attributes(
 		instantaneous_frequency = (
 			np.abs(_gradient(phase, axis=2)) / np.float32(2.0 * np.pi)
 		).astype(np.float32, copy=False)
+	instantaneous_frequency = _smooth_z_mean(
+		instantaneous_frequency,
+		config.instantaneous_frequency_smooth_z,
+	)
+	envelope_threshold = _safe_percentile(
+		envelope,
+		config.instantaneous_frequency_envelope_quantile * 100.0,
+		default=np.inf,
+	)
+	if np.isfinite(envelope_threshold):
+		instantaneous_frequency = np.where(
+			envelope >= np.float32(envelope_threshold),
+			instantaneous_frequency,
+			np.float32(0.0),
+		)
+	else:
+		instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+	valid_if = instantaneous_frequency[
+		np.isfinite(instantaneous_frequency) & (instantaneous_frequency >= 0.0)
+	]
+	if valid_if.size == 0:
+		instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+	else:
+		clip_value = np.float32(
+			np.percentile(
+				valid_if,
+				config.instantaneous_frequency_clip_percentile,
+			),
+		)
+		if not np.isfinite(clip_value) or clip_value < 0.0:
+			instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+		else:
+			instantaneous_frequency = np.clip(
+				instantaneous_frequency,
+				0.0,
+				clip_value,
+			).astype(np.float32, copy=False)
 	return (
 		_sanitize(phase_sin, config),
 		_sanitize(phase_cos, config),

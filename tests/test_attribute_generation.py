@@ -118,6 +118,32 @@ def test_generate_mvp_attributes_ramp_along_z_is_finite() -> None:
 	)
 
 
+def test_generate_mvp_attributes_zero_volume_has_zero_frequency() -> None:
+	amp = np.zeros((2, 3, 16), dtype=np.float32)
+
+	result = generate_mvp_attributes(amp)
+	instantaneous_frequency = result.attributes[3]
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert result.attributes.dtype == np.float32
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	np.testing.assert_array_equal(instantaneous_frequency, np.zeros_like(amp))
+
+
+def test_generate_mvp_attributes_random_volume_frequency_is_finite() -> None:
+	rng = np.random.default_rng(123)
+	amp = rng.normal(size=(3, 2, 24)).astype(np.float32)
+
+	result = generate_mvp_attributes(amp)
+	instantaneous_frequency = result.attributes[3]
+
+	assert instantaneous_frequency.shape == amp.shape
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	assert (instantaneous_frequency >= 0.0).all()
+
+
 def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	z_size = 32
 	z = np.arange(z_size, dtype=np.float32)
@@ -130,6 +156,31 @@ def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	assert float(result.attributes[3].mean()) > 0.0
 	assert float(result.attributes[4].mean()) > float(result.attributes[5].mean())
 	assert float(result.attributes[4].mean()) > float(result.attributes[6].mean())
+
+
+def test_generate_mvp_attributes_low_envelope_noisy_tail_is_suppressed() -> None:
+	rng = np.random.default_rng(123)
+	z_size = 128
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 4.0 * z / z_size).astype(np.float32)
+	trace[-32:] = (1.0e-4 * rng.standard_normal(32)).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+	config = AttributeGenerationConfig(
+		phase_reflect_pad_z=16,
+		instantaneous_frequency_smooth_z=3,
+		instantaneous_frequency_envelope_quantile=0.49,
+		instantaneous_frequency_clip_percentile=90.0,
+	)
+
+	result = generate_mvp_attributes(amp, config=config)
+	instantaneous_frequency = result.attributes[3]
+
+	assert instantaneous_frequency.shape == amp.shape
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	assert (instantaneous_frequency >= 0.0).all()
+	np.testing.assert_allclose(instantaneous_frequency[..., -32:], 0.0)
+	assert float(instantaneous_frequency[..., :-32].max()) > 0.0
 
 
 def test_hilbert_z_reflect_padding_preserves_original_shape() -> None:
