@@ -192,6 +192,7 @@ def _validate_mae_debug_display_flags(
 		'mask_invalid_values',
 		'show_valid_mask_panel',
 		'show_spatial_mask_panel',
+		'fail_on_error',
 	):
 		if key in mae_debug:
 			_validate_bool(mae_debug, key, prefix=prefix)

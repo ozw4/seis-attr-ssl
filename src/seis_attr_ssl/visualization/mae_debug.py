@@ -25,6 +25,11 @@ class MaeDebugVisualizationConfig:
 
 	output_dir: Path
 	attributes: tuple[str, ...]
+	every_n_steps: int | None = None
+	every_n_epochs: int | None = 1
+	max_batches_per_trigger: int = 1
+	max_samples_per_batch: int = 1
+	fail_on_error: bool = True
 	columns: tuple[str, ...] = (
 		'input',
 		'masked_input',

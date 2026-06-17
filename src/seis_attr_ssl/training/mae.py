@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 import re
 import shutil
-from collections.abc import Callable, Mapping
+import warnings
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -26,6 +27,10 @@ from seis_attr_ssl.training.diagnostics import (
 	write_json_diagnostic,
 )
 from seis_attr_ssl.training.logging import print_epoch_metrics
+from seis_attr_ssl.visualization.mae_debug import (
+	MaeDebugVisualizationConfig,
+	save_mae_debug_visualization_pngs,
+)
 
 _MANIFEST_BUILD_HINT = (
 	'Build NOPIMS manifests with '
@@ -73,12 +78,14 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	max_steps: int | None = None,
 	diagnostics_dir: Path | None = None,
 	grad_clip_norm: float | None = None,
+	visualization_config: MaeDebugVisualizationConfig | None = None,
 	step_callback: StepCallback | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
 	totals: dict[str, float] = {}
 	batches = 0
+	epoch_visualization_batches = 0
 
 	for batch_index, raw_batch in enumerate(dataloader):
 		if max_steps is not None and batches >= max_steps:
@@ -202,6 +209,27 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			step_metrics['grad_norm'] = current_grad_norm
 		batches += 1
 		global_step += 1
+		if visualization_config is not None:
+			epoch_triggered = _mae_debug_epoch_triggered(
+				config=visualization_config,
+				epoch=epoch,
+				epoch_visualization_batches=epoch_visualization_batches,
+			)
+			step_triggered = _mae_debug_step_triggered(
+				config=visualization_config,
+				global_step=global_step,
+			)
+			if epoch_triggered or step_triggered:
+				_save_mae_debug_visualization(
+					batch=batch,
+					model_output=output,
+					patch_size_xyz=patch_size_xyz,
+					epoch=epoch,
+					global_step=global_step,
+					config=visualization_config,
+				)
+				if epoch_triggered:
+					epoch_visualization_batches += 1
 		if step_callback is not None:
 			step_callback(
 				MaeStepState(
@@ -288,6 +316,7 @@ def run_mae_pretraining(
 		'checkpoint_every_steps',
 	)
 	grad_clip_norm = _optional_positive_float_config(train_config, 'grad_clip_norm')
+	visualization_config = _mae_debug_visualization_config(config, paths_config)
 	state: MaeTrainingState | None = MaeTrainingState(
 		epoch=start_epoch - 1,
 		global_step=global_step,
@@ -340,6 +369,7 @@ def run_mae_pretraining(
 			max_steps=remaining_steps,
 			diagnostics_dir=diagnostics_dir,
 			grad_clip_norm=grad_clip_norm,
+			visualization_config=visualization_config,
 			step_callback=save_step_checkpoint,
 		)
 		print_epoch_metrics(epoch, state.metrics)
@@ -363,6 +393,161 @@ def run_mae_pretraining(
 		msg = 'no MAE training epochs were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _mae_debug_visualization_config(
+	config: Mapping[str, object],
+	paths_config: Mapping[str, object],
+) -> MaeDebugVisualizationConfig | None:
+	visualization = config.get('visualization')
+	if visualization is None:
+		return None
+	if not isinstance(visualization, Mapping):
+		msg = f'visualization must be a mapping; got {visualization!r}'
+		raise TypeError(msg)
+	mae_debug = visualization.get('mae_debug')
+	if mae_debug is None:
+		return None
+	if not isinstance(mae_debug, Mapping):
+		msg = f'visualization.mae_debug must be a mapping; got {mae_debug!r}'
+		raise TypeError(msg)
+	if not _bool_config(mae_debug, 'enabled', default=False):
+		return None
+
+	output_dir_value = mae_debug.get('output_dir')
+	if output_dir_value is None:
+		output_dir = (
+			Path(_str_config(paths_config, 'output_root')).parent
+			/ 'visualizations'
+			/ 'mae_debug'
+		)
+	elif isinstance(output_dir_value, str):
+		output_dir = Path(output_dir_value)
+	else:
+		msg = (
+			'visualization.mae_debug.output_dir must be a string or null; '
+			f'got {output_dir_value!r}'
+		)
+		raise TypeError(msg)
+
+	return MaeDebugVisualizationConfig(
+		output_dir=output_dir,
+		attributes=_string_tuple_config(
+			mae_debug,
+			'attributes',
+			default=tuple(MVP_ATTRIBUTE_REGISTRY.names),
+		),
+		every_n_steps=_optional_int_config(mae_debug, 'every_n_steps'),
+		every_n_epochs=_optional_int_config(mae_debug, 'every_n_epochs'),
+		max_batches_per_trigger=_int_config(
+			mae_debug,
+			'max_batches_per_trigger',
+			1,
+		),
+		max_samples_per_batch=_int_config(
+			mae_debug,
+			'max_samples_per_batch',
+			1,
+		),
+		fail_on_error=_bool_config(mae_debug, 'fail_on_error', default=True),
+		columns=_string_tuple_config(
+			mae_debug,
+			'columns',
+			default=(
+				'input',
+				'masked_input',
+				'target',
+				'prediction',
+				'abs_error',
+			),
+		),
+		xy_slice_index=_optional_any_int_config(mae_debug, 'xy_slice_index'),
+		xz_slice_y_index=_optional_any_int_config(mae_debug, 'xz_slice_y_index'),
+		grid_mode=_str_config_with_default(mae_debug, 'grid_mode', 'auto'),
+		dpi=_int_config(mae_debug, 'dpi', 160),
+		panel_width=_float_config(mae_debug, 'panel_width', 3.2),
+		panel_height=_float_config(mae_debug, 'panel_height', 2.8),
+		clip_percentiles=_float_pair_config(
+			mae_debug,
+			'clip_percentiles',
+			default=(1.0, 99.0),
+		),
+		use_known_ranges=_bool_config(mae_debug, 'use_known_ranges', default=True),
+		mask_invalid_values=_bool_config(
+			mae_debug,
+			'mask_invalid_values',
+			default=True,
+		),
+		show_valid_mask_panel=_bool_config(
+			mae_debug,
+			'show_valid_mask_panel',
+			default=True,
+		),
+		show_spatial_mask_panel=_bool_config(
+			mae_debug,
+			'show_spatial_mask_panel',
+			default=True,
+		),
+		invalid_color=_str_config_with_default(
+			mae_debug,
+			'invalid_color',
+			'lightgray',
+		),
+	)
+
+
+def _mae_debug_epoch_triggered(
+	*,
+	config: MaeDebugVisualizationConfig,
+	epoch: int,
+	epoch_visualization_batches: int,
+) -> bool:
+	if config.every_n_epochs is None:
+		return False
+	return (
+		epoch % config.every_n_epochs == 0
+		and epoch_visualization_batches < config.max_batches_per_trigger
+	)
+
+
+def _mae_debug_step_triggered(
+	*,
+	config: MaeDebugVisualizationConfig,
+	global_step: int,
+) -> bool:
+	if config.every_n_steps is None:
+		return False
+	return global_step % config.every_n_steps == 0
+
+
+def _save_mae_debug_visualization(  # noqa: PLR0913
+	*,
+	batch: Mapping[str, torch.Tensor | object],
+	model_output: Mapping[str, torch.Tensor | object],
+	patch_size_xyz: tuple[int, int, int],
+	epoch: int,
+	global_step: int,
+	config: MaeDebugVisualizationConfig,
+) -> None:
+	try:
+		save_mae_debug_visualization_pngs(
+			batch=batch,
+			model_output=model_output,
+			patch_size_xyz=patch_size_xyz,
+			epoch=epoch,
+			global_step=global_step,
+			config=config,
+			max_samples=config.max_samples_per_batch,
+		)
+	except Exception as exc:
+		if config.fail_on_error:
+			raise
+		warnings.warn(
+			f'MAE debug visualization failed at epoch={epoch} '
+			f'global_step={global_step}: {exc}',
+			RuntimeWarning,
+			stacklevel=2,
+		)
 
 
 def _save_mae_checkpoint(  # noqa: PLR0913
@@ -677,12 +862,50 @@ def _optional_int_config(parent: Mapping[str, object], key: str) -> int | None:
 	return _int_config(parent, key, 1)
 
 
+def _optional_any_int_config(parent: Mapping[str, object], key: str) -> int | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, int) or isinstance(value, bool):
+		msg = f'{key} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
 def _float_config(parent: Mapping[str, object], key: str, default: float) -> float:
 	value = parent.get(key, default)
 	if not isinstance(value, float | int) or isinstance(value, bool):
 		msg = f'{key} must be a float; got {value!r}'
 		raise TypeError(msg)
 	return float(value)
+
+
+def _float_pair_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: tuple[float, float],
+) -> tuple[float, float]:
+	value = parent.get(key)
+	if value is None:
+		return default
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 2
+	):
+		msg = f'{key} must be a length-2 float sequence; got {value!r}'
+		raise TypeError(msg)
+	left, right = value
+	if (
+		not isinstance(left, float | int)
+		or isinstance(left, bool)
+		or not isinstance(right, float | int)
+		or isinstance(right, bool)
+	):
+		msg = f'{key} must be a length-2 float sequence; got {value!r}'
+		raise TypeError(msg)
+	return float(left), float(right)
 
 
 def _optional_positive_float_config(
@@ -721,6 +944,35 @@ def _bool_config(
 		msg = f'{key} must be a bool; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _str_config_with_default(
+	parent: Mapping[str, object],
+	key: str,
+	default: str,
+) -> str:
+	value = parent.get(key, default)
+	if not isinstance(value, str):
+		msg = f'{key} must be a string; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _string_tuple_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: tuple[str, ...],
+) -> tuple[str, ...]:
+	value = parent.get(key)
+	if value is None:
+		return default
+	if not isinstance(value, list | tuple) or not all(
+		isinstance(item, str) for item in value
+	):
+		msg = f'{key} must be a sequence of strings; got {value!r}'
+		raise TypeError(msg)
+	return tuple(value)
 
 
 def _xyz_config(parent: Mapping[str, object], key: str) -> tuple[int, int, int]:
