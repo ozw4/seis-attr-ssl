@@ -22,6 +22,7 @@ def _sample(
 		'attribute_ids': np.asarray(attribute_ids, dtype=np.int64),
 		'spatial_mask': np.asarray([[[True]]], dtype=bool),
 		'visible_spatial_mask': np.asarray([[[False]]], dtype=bool),
+		'local_valid_mask': np.ones(shape, dtype=bool),
 		'attribute_input_mask': np.asarray([True, False, True, False], dtype=bool),
 		'attribute_target_mask': np.ones(4, dtype=bool),
 		'dropped_attribute_mask': np.asarray([False, True, False, True], dtype=bool),
@@ -97,6 +98,15 @@ def test_context_absence_is_handled_when_use_context_false() -> None:
 	assert batch['context_valid_mask'] is None
 
 
+def test_local_valid_mask_absence_is_handled_for_legacy_samples() -> None:
+	sample = _sample((0, 1), use_context=False)
+	del sample['local_valid_mask']
+
+	batch = mae_collate_fn([sample])
+
+	assert batch['local_valid_mask'] is None
+
+
 def test_collated_none_context_batch_runs_through_model() -> None:
 	batch = mae_collate_fn([_sample((0, 1), use_context=False)])
 	batch['spatial_mask'] = torch.zeros((1, 1, 1, 1), dtype=torch.bool)
@@ -128,6 +138,7 @@ def test_collated_dtypes_are_correct() -> None:
 	assert batch['attribute_ids'].dtype == torch.long
 	assert batch['spatial_mask'].dtype == torch.bool
 	assert batch['visible_spatial_mask'].dtype == torch.bool
+	assert batch['local_valid_mask'].dtype == torch.bool
 	assert batch['attribute_input_mask'].dtype == torch.bool
 	assert batch['attribute_target_mask'].dtype == torch.bool
 	assert batch['dropped_attribute_mask'].dtype == torch.bool

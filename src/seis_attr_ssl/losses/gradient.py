@@ -7,7 +7,7 @@ from typing import Literal
 import torch
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
-from seis_attr_ssl.models.mae.patching import unpatchify_3d
+from seis_attr_ssl.models.mae.patching import patchify_3d, unpatchify_3d
 
 LossMode = Literal['huber', 'mse']
 
@@ -19,6 +19,8 @@ def gradient_loss_xyz(  # noqa: PLR0913
 	spatial_mask: torch.Tensor,
 	target_valid: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
+	local_valid_mask: torch.Tensor | None = None,
+	valid_patch_min_fraction: float = 0.5,
 	reconstruction: LossMode = 'huber',
 	huber_delta: float = 1.0,
 	family_balanced: bool = True,
@@ -36,8 +38,25 @@ def gradient_loss_xyz(  # noqa: PLR0913
 		(pred_patches.shape[0], pred_patches.shape[2]),
 	)
 	_validate_same_device(pred_patches, target, spatial_mask, target_valid)
+	if local_valid_mask is not None:
+		_validate_local_valid_mask(local_valid_mask, target)
+		_validate_same_device(
+			pred_patches,
+			target,
+			spatial_mask,
+			target_valid,
+			local_valid_mask,
+		)
 
 	grid_size_xyz = _grid_size_from_mask(spatial_mask, pred_patches.shape[1])
+	valid_patch_mask = _local_valid_patch_mask(
+		local_valid_mask=local_valid_mask,
+		pred_patches=pred_patches,
+		patch_size_xyz=patch_size_xyz,
+		valid_patch_min_fraction=valid_patch_min_fraction,
+	)
+	if valid_patch_mask is not None:
+		spatial_mask = spatial_mask & valid_patch_mask.reshape_as(spatial_mask)
 	pred_volume = unpatchify_3d(pred_patches, patch_size_xyz, grid_size_xyz)
 	if pred_volume.shape != target.shape:
 		msg = (
@@ -47,6 +66,8 @@ def gradient_loss_xyz(  # noqa: PLR0913
 		raise ValueError(msg)
 
 	volume_mask = _spatial_mask_to_volume(spatial_mask, patch_size_xyz)
+	if local_valid_mask is not None:
+		volume_mask = volume_mask & local_valid_mask
 	attr_weights = _attribute_family_weights(
 		pred_patches.shape[2],
 		device=pred_patches.device,
@@ -156,6 +177,60 @@ def _validate_same_device(*tensors: torch.Tensor) -> None:
 		device_names = sorted(map(str, devices))
 		msg = f'all tensors must be on the same device; got {device_names!r}'
 		raise ValueError(msg)
+
+
+def _validate_local_valid_mask(
+	local_valid_mask: torch.Tensor,
+	target: torch.Tensor,
+) -> None:
+	if local_valid_mask.dtype != torch.bool:
+		msg = (
+			'local_valid_mask must have dtype torch.bool; '
+			f'got {local_valid_mask.dtype!r}'
+		)
+		raise TypeError(msg)
+	expected_shape = (
+		target.shape[0],
+		target.shape[2],
+		target.shape[3],
+		target.shape[4],
+	)
+	if tuple(local_valid_mask.shape) != expected_shape:
+		msg = (
+			f'local_valid_mask shape must be {expected_shape!r}; '
+			f'got {tuple(local_valid_mask.shape)!r}'
+		)
+		raise ValueError(msg)
+
+
+def _local_valid_patch_mask(
+	*,
+	local_valid_mask: torch.Tensor | None,
+	pred_patches: torch.Tensor,
+	patch_size_xyz: tuple[int, int, int],
+	valid_patch_min_fraction: float,
+) -> torch.Tensor | None:
+	if local_valid_mask is None:
+		return None
+	if not 0.0 <= valid_patch_min_fraction <= 1.0:
+		msg = (
+			'valid_patch_min_fraction must be between 0.0 and 1.0; '
+			f'got {valid_patch_min_fraction!r}'
+		)
+		raise ValueError(msg)
+	patches = patchify_3d(
+		local_valid_mask.unsqueeze(1).to(dtype=pred_patches.dtype),
+		patch_size_xyz,
+	)
+	valid_fraction = patches.squeeze(2).mean(dim=-1)
+	if valid_fraction.shape != (pred_patches.shape[0], pred_patches.shape[1]):
+		msg = (
+			'patchified local_valid_mask must match pred_patches patch grid; '
+			f'got {tuple(valid_fraction.shape)!r} and '
+			f'{(pred_patches.shape[0], pred_patches.shape[1])!r}'
+		)
+		raise ValueError(msg)
+	return valid_fraction > valid_patch_min_fraction
 
 
 def _grid_size_from_mask(

@@ -97,6 +97,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					batch,
 					'dropped_attribute_mask',
 				),
+				local_valid_mask=_optional_tensor(batch, 'local_valid_mask'),
+				valid_patch_min_fraction=_float_config(
+					loss_config,
+					'valid_patch_min_fraction',
+					0.5,
+				),
 				patch_size_xyz=patch_size_xyz,
 				reconstruction=_loss_mode(loss_config.get('reconstruction', 'huber')),
 				huber_delta=_float_config(loss_config, 'huber_delta', 1.0),
@@ -605,6 +611,19 @@ def _required_tensor(
 	value = mapping[key]
 	if not isinstance(value, torch.Tensor):
 		msg = f'{key} must be a torch.Tensor; got {type(value).__name__}'
+		raise TypeError(msg)
+	return value
+
+
+def _optional_tensor(
+	mapping: Mapping[str, object],
+	key: str,
+) -> torch.Tensor | None:
+	value = mapping.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, torch.Tensor):
+		msg = f'{key} must be a torch.Tensor when present; got {type(value).__name__}'
 		raise TypeError(msg)
 	return value
 

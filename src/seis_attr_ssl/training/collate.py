@@ -39,6 +39,18 @@ def mae_collate_fn(
 	):
 		batch[key] = _stack_arrays(samples, key)
 
+	local_valid_values = [sample.get('local_valid_mask') for sample in samples]
+	if any(value is not None for value in local_valid_values):
+		if any(value is None for value in local_valid_values):
+			msg = (
+				'local_valid_mask must be present for every sample or omitted '
+				'for every sample'
+			)
+			raise ValueError(msg)
+		batch['local_valid_mask'] = _stack_arrays(samples, 'local_valid_mask')
+	else:
+		batch['local_valid_mask'] = None
+
 	context_values = [sample.get('context') for sample in samples]
 	if any(value is not None for value in context_values):
 		if any(value is None for value in context_values):
