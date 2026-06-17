@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping, Sequence
 from numbers import Integral, Real
@@ -349,6 +350,8 @@ def _validate_train(train: Mapping[str, object]) -> None:
 		_validate_nonnegative_int(train, 'num_workers', prefix='train')
 	if 'shuffle' in train:
 		_validate_bool(train, 'shuffle', prefix='train')
+	if 'grad_clip_norm' in train:
+		_validate_optional_positive_float(train, 'grad_clip_norm', prefix='train')
 
 
 def _validate_model(model: Mapping[str, object]) -> None:
@@ -407,6 +410,25 @@ def _validate_unit_fraction(
 		msg = f'{prefix}.{key} must be in (0, 1]; got {fraction!r}'
 		raise ValueError(msg)
 	return fraction
+
+
+def _validate_optional_positive_float(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> float | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{prefix}.{key} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if not math.isfinite(number) or number <= 0.0:
+		msg = f'{prefix}.{key} must be finite and positive; got {value!r}'
+		raise ValueError(msg)
+	return number
 
 
 def _validate_positive_int(

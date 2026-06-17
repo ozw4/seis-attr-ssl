@@ -348,6 +348,11 @@ def test_invalid_masking_attribute_bounds_raise_clear_value_error() -> None:
 		('num_workers', -1, ValueError, 'train\\.num_workers'),
 		('num_workers', False, TypeError, 'train\\.num_workers'),
 		('shuffle', 'true', TypeError, 'train\\.shuffle'),
+		('grad_clip_norm', 0, ValueError, 'train\\.grad_clip_norm'),
+		('grad_clip_norm', -1.0, ValueError, 'train\\.grad_clip_norm'),
+		('grad_clip_norm', float('nan'), ValueError, 'train\\.grad_clip_norm'),
+		('grad_clip_norm', float('inf'), ValueError, 'train\\.grad_clip_norm'),
+		('grad_clip_norm', True, TypeError, 'train\\.grad_clip_norm'),
 	],
 )
 def test_invalid_train_runtime_fields_raise_clear_error(
