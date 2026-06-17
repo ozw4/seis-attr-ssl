@@ -162,6 +162,60 @@ def test_one_epoch_cpu_training_writes_loadable_checkpoint(tmp_path: Path) -> No
 	assert np.isfinite(loss)
 
 
+def test_run_mae_pretraining_resumes_from_checkpoint_epoch_boundary(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['epochs'] = 2
+	resumed_checkpoint_path = run_mae_pretraining(
+		resume_cfg,
+		resume=checkpoint_path,
+	)
+
+	checkpoint = load_checkpoint(resumed_checkpoint_path, map_location='cpu')
+	assert resumed_checkpoint_path.name == 'mae_epoch_0002.pt'
+	assert checkpoint['epoch'] == 2
+	assert checkpoint['global_step'] == 2
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
+	assert checkpoint['optimizer_state_dict']
+
+
+def test_run_mae_pretraining_resume_validates_checkpoint_payload(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	missing_model_path = tmp_path / 'missing-model.pt'
+	missing_model = dict(payload)
+	missing_model.pop('model_state_dict')
+	torch.save(missing_model, missing_model_path)
+
+	with pytest.raises(ValueError, match='model_state_dict'):
+		run_mae_pretraining(cfg, resume=missing_model_path)
+
+	missing_optimizer_path = tmp_path / 'missing-optimizer.pt'
+	missing_optimizer = dict(payload)
+	missing_optimizer.pop('optimizer_state_dict')
+	torch.save(missing_optimizer, missing_optimizer_path)
+
+	with pytest.raises(ValueError, match='optimizer_state_dict'):
+		run_mae_pretraining(cfg, resume=missing_optimizer_path)
+
+	wrong_stage_path = tmp_path / 'wrong-stage.pt'
+	wrong_stage = dict(payload)
+	wrong_stage['config'] = {**wrong_stage['config'], 'stage': 'finetune_f3'}
+	torch.save(wrong_stage, wrong_stage_path)
+
+	with pytest.raises(ValueError, match='pretrain_mae'):
+		run_mae_pretraining(cfg, resume=wrong_stage_path)
+
+
 def test_one_epoch_cpu_training_records_grad_norm_when_clipping_enabled(
 	tmp_path: Path,
 ) -> None:

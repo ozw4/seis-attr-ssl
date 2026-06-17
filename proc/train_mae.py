@@ -46,6 +46,11 @@ def main() -> None:
 		type=Path,
 		help='Override paths.output_root for checkpoints.',
 	)
+	parser.add_argument(
+		'--resume',
+		type=Path,
+		help='Resume MAE pretraining from a checkpoint.',
+	)
 	args = parser.parse_args()
 
 	config = load_config(args.config)
@@ -56,11 +61,15 @@ def main() -> None:
 		output_root=args.output_root,
 	)
 	config = validate_config(config)
+	if args.resume is not None and not args.resume.is_file():
+		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
 	if args.dry_run:
 		print_config_summary(config)
+		if args.resume is not None:
+			print(f'resume: {args.resume}')
 		return
 
-	checkpoint_path = run_mae_pretraining(config)
+	checkpoint_path = run_mae_pretraining(config, resume=args.resume)
 	print(f'checkpoint: {checkpoint_path}')
 
 

@@ -26,8 +26,10 @@ def test_train_mae_proc_one_step_cpu_run_writes_checkpoint(tmp_path: Path) -> No
 	manifest_path = _write_synthetic_manifest(tmp_path / 'survey')
 	config_path = tmp_path / 'mae.yaml'
 	output_root = tmp_path / 'runs'
+	config = _synthetic_config(tmp_path, manifest_path)
+	config['train']['epochs'] = 2
 	config_path.write_text(
-		yaml.safe_dump(_synthetic_config(tmp_path, manifest_path)),
+		yaml.safe_dump(config),
 		encoding='utf-8',
 	)
 
@@ -54,6 +56,30 @@ def test_train_mae_proc_one_step_cpu_run_writes_checkpoint(tmp_path: Path) -> No
 	assert checkpoint['config']['train']['max_steps'] == 1
 	assert np.isfinite(checkpoint['metrics']['loss'])
 
+	resume_result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		config_path,
+		'--device',
+		'cpu',
+		'--max-steps',
+		'2',
+		'--output-root',
+		output_root,
+		'--resume',
+		checkpoint_path,
+		timeout=120,
+	)
+
+	assert resume_result.returncode == 0, resume_result.stderr
+	resumed_checkpoint_path = output_root / 'mae_epoch_0002.pt'
+	assert resumed_checkpoint_path.is_file()
+	assert f'checkpoint: {resumed_checkpoint_path}' in resume_result.stdout
+	resumed_checkpoint = load_checkpoint(resumed_checkpoint_path, map_location='cpu')
+	assert resumed_checkpoint['epoch'] == 2
+	assert resumed_checkpoint['global_step'] == 2
+	assert resumed_checkpoint['config']['train']['max_steps'] == 2
+
 
 def test_train_mae_proc_missing_manifest_explains_how_to_build(
 	tmp_path: Path,
@@ -77,6 +103,29 @@ def test_train_mae_proc_missing_manifest_explains_how_to_build(
 	assert result.returncode != 0
 	assert 'manifests.train does not exist' in result.stderr
 	assert 'proc/build_nopims_manifests.py' in result.stderr
+
+
+def test_train_mae_proc_missing_resume_checkpoint_fails(tmp_path: Path) -> None:
+	config_path = tmp_path / 'mae.yaml'
+	config_path.write_text(
+		yaml.safe_dump(_synthetic_config(tmp_path, tmp_path / 'missing.json')),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		config_path,
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
+		'--resume',
+		tmp_path / 'missing-checkpoint.pt',
+	)
+
+	assert result.returncode != 0
+	assert 'resume checkpoint does not exist' in result.stderr
 
 
 def test_train_mae_proc_missing_manifest_train_key_explains_how_to_build(
@@ -150,8 +199,8 @@ def _synthetic_config(tmp_path: Path, manifest_path: Path) -> dict[str, object]:
 			'local_crop_size': [128, 128, 128],
 			'context_crop_size': [512, 512, 512],
 			'context_downsample': 4,
-			'local_attribute_halo': [16, 16, 64],
-			'context_attribute_halo': [8, 8, 16],
+			'local_attribute_halo': [0, 0, 0],
+			'context_attribute_halo': [0, 0, 0],
 			'require_full_halo_inside_volume': True,
 			'use_context': False,
 		},

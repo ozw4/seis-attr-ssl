@@ -55,6 +55,42 @@ def test_train_mae_dry_run_prints_masking_settings() -> None:
 	assert 'train.shuffle: true' in result.stdout
 
 
+def test_train_mae_help_includes_resume() -> None:
+	result = run_python_proc(Path('proc/train_mae.py'), '--help')
+
+	assert result.returncode == 0, result.stderr
+	assert '--resume' in result.stdout
+
+
+def test_train_mae_dry_run_checks_resume_path_and_prints_it(tmp_path: Path) -> None:
+	resume_path = tmp_path / 'checkpoint.pt'
+	resume_path.write_bytes(b'placeholder')
+
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--dry-run',
+		'--resume',
+		resume_path,
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert f'resume: {resume_path}' in result.stdout
+
+
+def test_train_mae_dry_run_missing_resume_path_fails(tmp_path: Path) -> None:
+	resume_path = tmp_path / 'missing.pt'
+
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--dry-run',
+		'--resume',
+		resume_path,
+	)
+
+	assert result.returncode != 0
+	assert 'resume checkpoint does not exist' in result.stderr
+
+
 @pytest.mark.parametrize(
 	('args', 'expected_stderr'),
 	[

@@ -16,7 +16,7 @@ from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.data import NopimsAttributePretrainDataset, read_manifest_json
 from seis_attr_ssl.losses import mae_pretraining_loss
 from seis_attr_ssl.models.mae import StrictAttributeSetMAE3D
-from seis_attr_ssl.training.checkpoint import save_checkpoint
+from seis_attr_ssl.training.checkpoint import load_checkpoint, save_checkpoint
 from seis_attr_ssl.training.collate import move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
 from seis_attr_ssl.training.diagnostics import (
@@ -189,7 +189,11 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 	)
 
 
-def run_mae_pretraining(config: Mapping[str, object]) -> Path:
+def run_mae_pretraining(
+	config: Mapping[str, object],
+	*,
+	resume: str | Path | None = None,
+) -> Path:
 	"""Run strict MAE pretraining from ``config`` and return the last checkpoint."""
 	_validate_no_f3_pretraining_config(config)
 	manifests = read_manifest_json(_manifest_train_path(config))
@@ -227,22 +231,37 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 		and torch.cuda.is_available()
 	)
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
+	start_epoch = 1
+	global_step = 0
+	if resume is not None:
+		payload = load_checkpoint(resume, map_location=device)
+		start_epoch, global_step = _restore_mae_checkpoint(
+			payload=payload,
+			model=model,
+			optimizer=optimizer,
+			scaler=scaler,
+			amp_enabled=amp_enabled,
+		)
 
 	output_root = Path(_str_config(paths_config, 'output_root'))
 	diagnostics_dir = _resolve_diagnostics_dir(train_config, output_root)
 	epochs = _int_config(train_config, 'epochs', 1)
 	max_steps = _optional_int_config(train_config, 'max_steps')
 	grad_clip_norm = _optional_positive_float_config(train_config, 'grad_clip_norm')
-	state: MaeTrainingState | None = None
+	state: MaeTrainingState | None = MaeTrainingState(
+		epoch=start_epoch - 1,
+		global_step=global_step,
+		metrics={},
+		amp_enabled=amp_enabled,
+	)
 	checkpoint_path: Path | None = None
-	for epoch in range(1, epochs + 1):
+	for epoch in range(start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
 			set_epoch(epoch - 1)
 		remaining_steps = None
 		if max_steps is not None:
-			previous_steps = 0 if state is None else state.global_step
-			remaining_steps = max_steps - previous_steps
+			remaining_steps = max_steps - state.global_step
 			if remaining_steps <= 0:
 				break
 		state = train_mae_one_epoch(
@@ -255,7 +274,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			loss_config=loss_config,
 			amp_enabled=amp_enabled,
 			scaler=scaler,
-			global_step=0 if state is None else state.global_step,
+			global_step=state.global_step,
 			max_steps=remaining_steps,
 			diagnostics_dir=diagnostics_dir,
 			grad_clip_norm=grad_clip_norm,
@@ -278,9 +297,50 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			break
 
 	if checkpoint_path is None:
-		msg = 'train.epochs must be positive'
+		msg = 'no MAE training epochs were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _restore_mae_checkpoint(
+	*,
+	payload: Mapping[str, object],
+	model: torch.nn.Module,
+	optimizer: torch.optim.Optimizer,
+	scaler: torch.amp.GradScaler | None,
+	amp_enabled: bool,
+) -> tuple[int, int]:
+	_validate_resume_payload(payload)
+	model.load_state_dict(payload['model_state_dict'])
+	optimizer.load_state_dict(payload['optimizer_state_dict'])
+	if amp_enabled and payload.get('scaler_state_dict') is not None:
+		if scaler is None:
+			msg = 'scaler is required when amp_enabled is true'
+			raise ValueError(msg)
+		scaler.load_state_dict(payload['scaler_state_dict'])
+	return int(payload['epoch']) + 1, int(payload.get('global_step', 0))
+
+
+def _validate_resume_payload(payload: Mapping[str, object]) -> None:
+	if 'model_state_dict' not in payload:
+		msg = 'resume checkpoint is missing model_state_dict'
+		raise ValueError(msg)
+	if 'optimizer_state_dict' not in payload:
+		msg = 'resume checkpoint is missing optimizer_state_dict'
+		raise ValueError(msg)
+	stage = _checkpoint_stage(payload)
+	if stage is not None and stage != 'pretrain_mae':
+		msg = f'resume checkpoint stage must be pretrain_mae; got {stage!r}'
+		raise ValueError(msg)
+
+
+def _checkpoint_stage(payload: Mapping[str, object]) -> object | None:
+	if 'stage' in payload:
+		return payload.get('stage')
+	config = payload.get('config')
+	if isinstance(config, Mapping):
+		return config.get('stage')
+	return None
 
 
 def _build_model(
