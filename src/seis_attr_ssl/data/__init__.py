@@ -40,6 +40,10 @@ if TYPE_CHECKING:
 		scan_nopims_manifests,
 		summarize_manifests,
 	)
+	from seis_attr_ssl.data.manifest_filter import (
+		FilteredManifestStatsQcResult,
+		filter_manifests_by_stats_qc,
+	)
 	from seis_attr_ssl.data.normalization import (
 		SurveyNormalizationStats,
 		compute_normalization_stats,
@@ -91,6 +95,7 @@ __all__ = [
 	'AttributeVolumeRecord',
 	'BaseSeismicVolumeRecord',
 	'CropRequest',
+	'FilteredManifestStatsQcResult',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'NopimsAttributePretrainDataset',
@@ -113,6 +118,7 @@ __all__ = [
 	'downsample_context_mean',
 	'evaluate_normalization_stats',
 	'evaluate_normalization_stats_file',
+	'filter_manifests_by_stats_qc',
 	'generate_mvp_attributes',
 	'generate_mvp_attributes_for_payload',
 	'inspect_npy_volume',
@@ -148,6 +154,11 @@ _MANIFEST_BUILDER_EXPORTS = {
 	'scan_nopims_base_seismic_manifests_from_path_list',
 	'scan_nopims_manifests',
 	'summarize_manifests',
+}
+
+_MANIFEST_FILTER_EXPORTS = {
+	'FilteredManifestStatsQcResult',
+	'filter_manifests_by_stats_qc',
 }
 
 _CROP_SAMPLER_EXPORTS = {
@@ -227,6 +238,7 @@ _VOLUME_STORE_EXPORTS = {
 
 _EXPORT_MODULES = {
 	**dict.fromkeys(_MANIFEST_BUILDER_EXPORTS, 'seis_attr_ssl.data.manifest_builder'),
+	**dict.fromkeys(_MANIFEST_FILTER_EXPORTS, 'seis_attr_ssl.data.manifest_filter'),
 	**dict.fromkeys(_CROP_SAMPLER_EXPORTS, 'seis_attr_ssl.data.crop_sampler'),
 	**dict.fromkeys(
 		_ATTRIBUTE_GENERATION_EXPORTS,

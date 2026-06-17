@@ -8,6 +8,7 @@ from tests.helpers import run_python_proc
 
 PROC_SCRIPTS = (
 	Path('proc/build_nopims_manifests.py'),
+	Path('proc/filter_nopims_manifest_by_stats_qc.py'),
 	Path('proc/prepare_normalization_stats.py'),
 	Path('proc/prepare_nopims_normalization_stats.py'),
 	Path('proc/generate_attributes.py'),
@@ -18,6 +19,12 @@ PROC_SCRIPTS = (
 	Path('proc/infer_volume.py'),
 )
 
+DRY_RUN_PROC_SCRIPTS = tuple(
+	script_path
+	for script_path in PROC_SCRIPTS
+	if script_path != Path('proc/filter_nopims_manifest_by_stats_qc.py')
+)
+
 
 @pytest.mark.parametrize('script_path', PROC_SCRIPTS)
 def test_proc_script_help_exits_zero(script_path: Path) -> None:
@@ -26,7 +33,7 @@ def test_proc_script_help_exits_zero(script_path: Path) -> None:
 	assert result.returncode == 0, result.stderr
 
 
-@pytest.mark.parametrize('script_path', PROC_SCRIPTS)
+@pytest.mark.parametrize('script_path', DRY_RUN_PROC_SCRIPTS)
 def test_proc_script_dry_run_exits_zero_and_prints_stage(
 	script_path: Path,
 ) -> None:
@@ -160,7 +167,9 @@ def test_prepare_nopims_normalization_stats_missing_manifest_fails_actionably(
 ) -> None:
 	config_path = tmp_path / 'mae.yaml'
 	config_path.write_text(
-		Path('proc/configs/mvp_mae.yaml').read_text(encoding='utf-8').replace(
+		Path('proc/configs/mvp_mae.yaml')
+		.read_text(encoding='utf-8')
+		.replace(
 			'/home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json',
 			str(tmp_path / 'missing.json'),
 		),
