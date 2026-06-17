@@ -52,6 +52,22 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['train']['samples_per_epoch'] == 10000
 	assert cfg['train']['num_workers'] == 4
 	assert cfg['train']['shuffle'] is True
+	assert cfg['visualization']['mae_debug']['enabled'] is False
+	assert cfg['visualization']['mae_debug']['attributes'] == [
+		'amplitude_norm',
+		'phase_sin',
+		'instantaneous_frequency',
+		'spectral_mid_ratio',
+		'coherence',
+		'glcm_contrast',
+	]
+	assert cfg['visualization']['mae_debug']['columns'] == [
+		'input',
+		'masked_input',
+		'target',
+		'prediction',
+		'abs_error',
+	]
 
 
 @pytest.mark.parametrize('config_path', DEFAULT_CONFIGS)
@@ -96,6 +112,45 @@ def test_attribute_generation_config_is_optional_for_mae_validation() -> None:
 	del cfg['attribute_generation']
 
 	validate_config(cfg)
+
+
+def test_visualization_config_is_optional_for_mae_validation() -> None:
+	cfg = _valid_config()
+	del cfg['visualization']
+
+	validate_config(cfg)
+
+
+def test_mae_debug_visualization_disabled_default_validates() -> None:
+	cfg = _valid_config()
+
+	validate_config(cfg)
+
+	assert cfg['visualization']['mae_debug']['enabled'] is False
+
+
+def test_invalid_mae_debug_attribute_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['visualization']['mae_debug']['attributes'] = ['not_an_attribute']
+
+	with pytest.raises(ValueError, match='visualization\\.mae_debug\\.attributes'):
+		validate_config(cfg)
+
+
+def test_invalid_mae_debug_column_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['visualization']['mae_debug']['columns'] = ['input', 'residual']
+
+	with pytest.raises(ValueError, match='visualization\\.mae_debug\\.columns'):
+		validate_config(cfg)
+
+
+def test_invalid_mae_debug_grid_mode_raises_clear_value_error() -> None:
+	cfg = _valid_config()
+	cfg['visualization']['mae_debug']['grid_mode'] = 'wide'
+
+	with pytest.raises(ValueError, match='visualization\\.mae_debug\\.grid_mode'):
+		validate_config(cfg)
 
 
 def test_valid_attribute_generation_config_is_allowed() -> None:

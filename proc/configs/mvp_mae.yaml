@@ -82,6 +82,52 @@ masking:
   attribute_dropout_prob: 0.30
   group_dropout_prob: 0.20
 
+visualization:
+  mae_debug:
+    enabled: false
+
+    # If null, use <paths.output_root>/../visualizations/mae_debug
+    output_dir: null
+
+    # Frequency controls. If both are set, save when either condition matches.
+    every_n_steps: null
+    every_n_epochs: 1
+
+    # Avoid writing multiple batches per trigger.
+    max_batches_per_trigger: 1
+    max_samples_per_batch: 1
+
+    # Attribute rows. Use registry names. Keep short by default.
+    attributes:
+      - amplitude_norm
+      - phase_sin
+      - instantaneous_frequency
+      - spectral_mid_ratio
+      - coherence
+      - glcm_contrast
+
+    # Views
+    xy_slice_index: null       # null => center z
+    xz_slice_y_index: null     # null => center y
+
+    # Layout
+    columns:
+      - input
+      - masked_input
+      - target
+      - prediction
+      - abs_error
+
+    grid_mode: auto
+    dpi: 160
+    panel_width: 3.2
+    panel_height: 2.8
+    clip_percentiles: [1.0, 99.0]
+    use_known_ranges: true
+    mask_invalid_values: true
+    show_valid_mask_panel: true
+    show_spatial_mask_panel: true
+
 model:
   name: strict_attribute_set_mae3d
   patch_size: [8, 8, 8]
