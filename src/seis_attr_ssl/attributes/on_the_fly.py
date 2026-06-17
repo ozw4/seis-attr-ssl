@@ -2,8 +2,8 @@
 
 The MVP generator intentionally uses deterministic, dependency-light
 approximations. Phase and instantaneous frequency come from a NumPy FFT Hilbert
-transform along the z axis. Spectral ratios are whole-trace low/mid/high FFT
-energy fractions broadcast back over each trace. Coherence is a local
+transform along the z axis. Spectral ratios use FFT band-limited traces with
+local z-window energy ratios. Coherence is a local
 finite-difference similarity proxy, and GLCM texture channels are quantized
 finite-difference contrast/homogeneity proxies rather than full co-occurrence
 matrix estimates.
@@ -606,15 +606,18 @@ def _spectral_ratios(
 	amplitude: np.ndarray,
 	config: AttributeGenerationConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-	z_size = amplitude.shape[2]
+	values = np.asarray(amplitude, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'amplitude must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
 	if z_size < 2:
-		zeros = np.zeros_like(amplitude, dtype=np.float32)
+		zeros = np.zeros_like(values, dtype=np.float32)
 		return zeros, zeros, zeros
 
-	spectrum = np.fft.rfft(amplitude, axis=2)
-	power = (
-		np.square(spectrum.real) + np.square(spectrum.imag)
-	).astype(np.float32, copy=False)
+	spectrum = np.fft.rfft(values, axis=2)
+	if config.spectral_remove_dc:
+		spectrum[..., 0] = 0.0
 	frequencies = np.fft.rfftfreq(z_size, d=1.0)
 	relative = frequencies / frequencies[-1]
 	low_mask = relative <= config.spectral_low_max_fraction
@@ -622,16 +625,56 @@ def _spectral_ratios(
 		relative <= config.spectral_mid_max_fraction
 	)
 	high_mask = relative > config.spectral_mid_max_fraction
-	total = power.sum(axis=2, keepdims=True, dtype=np.float32)
-	total = total + np.float32(config.eps)
-	low = power[..., low_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	mid = power[..., mid_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	high = power[..., high_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	return (
-		np.broadcast_to(low, amplitude.shape).astype(np.float32, copy=False),
-		np.broadcast_to(mid, amplitude.shape).astype(np.float32, copy=False),
-		np.broadcast_to(high, amplitude.shape).astype(np.float32, copy=False),
+
+	low_energy = _local_spectral_band_energy(
+		spectrum,
+		low_mask,
+		z_size,
+		config.spectral_local_window_z,
 	)
+	mid_energy = _local_spectral_band_energy(
+		spectrum,
+		mid_mask,
+		z_size,
+		config.spectral_local_window_z,
+	)
+	high_energy = _local_spectral_band_energy(
+		spectrum,
+		high_mask,
+		z_size,
+		config.spectral_local_window_z,
+	)
+	total = low_energy + mid_energy + high_energy + np.float32(config.eps)
+
+	return (
+		_sanitize_spectral_ratio(low_energy / total, config),
+		_sanitize_spectral_ratio(mid_energy / total, config),
+		_sanitize_spectral_ratio(high_energy / total, config),
+	)
+
+
+def _local_spectral_band_energy(
+	spectrum: np.ndarray,
+	bin_mask: np.ndarray,
+	z_size: int,
+	window_z: int,
+) -> np.ndarray:
+	if not bool(np.any(bin_mask)):
+		return np.zeros((*spectrum.shape[:2], z_size), dtype=np.float32)
+	band_spectrum = np.zeros_like(spectrum)
+	band_spectrum[..., bin_mask] = spectrum[..., bin_mask]
+	band_trace = np.fft.irfft(band_spectrum, n=z_size, axis=2).astype(
+		np.float32,
+		copy=False,
+	)
+	return _smooth_z_mean(np.square(band_trace), window_z)
+
+
+def _sanitize_spectral_ratio(
+	ratio: np.ndarray,
+	config: AttributeGenerationConfig,
+) -> np.ndarray:
+	return _sanitize(np.clip(ratio, 0.0, 1.0), config)
 
 
 def _quantize_for_texture(

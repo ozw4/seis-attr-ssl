@@ -10,6 +10,7 @@ from seis_attr_ssl.attributes.on_the_fly import (
 	_hilbert_z,
 	_reflect_pad_z,
 	_smooth_z_mean,
+	_spectral_ratios,
 	_unpad_z,
 )
 from seis_attr_ssl.data import (
@@ -93,7 +94,7 @@ def test_generate_mvp_attributes_constant_cube_contract() -> None:
 	assert (result.attributes[2] >= -1.0).all()
 	assert (result.attributes[2] <= 1.0).all()
 	assert (result.attributes[3] >= 0.0).all()
-	np.testing.assert_allclose(result.attributes[4], 1.0, atol=1.0e-5)
+	np.testing.assert_allclose(result.attributes[4:7], 0.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[7], 1.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[8], 0.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[9], 1.0, atol=1.0e-6)
@@ -116,6 +117,71 @@ def test_generate_mvp_attributes_ramp_along_z_is_finite() -> None:
 		1.0,
 		atol=1.0e-5,
 	)
+
+
+def test_spectral_ratios_return_input_shape_and_float32_dtype() -> None:
+	rng = np.random.default_rng(123)
+	amp = rng.normal(size=(3, 2, 32)).astype(np.float32)
+	config = AttributeGenerationConfig(spectral_local_window_z=7)
+
+	low, mid, high = _spectral_ratios(amp, config)
+
+	for ratio in (low, mid, high):
+		assert ratio.shape == amp.shape
+		assert ratio.dtype == np.float32
+
+
+def test_spectral_ratios_are_finite_bounded_and_sum_to_one_for_energy() -> None:
+	z_size = 64
+	z = np.arange(z_size, dtype=np.float32)
+	trace = (
+		np.sin(2.0 * np.pi * 4.0 * z / z_size)
+		+ np.float32(0.5) * np.sin(2.0 * np.pi * 20.0 * z / z_size)
+	).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 3, z_size)).copy()
+	config = AttributeGenerationConfig(spectral_local_window_z=9)
+
+	low, mid, high = _spectral_ratios(amp, config)
+
+	for ratio in (low, mid, high):
+		assert np.isfinite(ratio).all()
+		assert (ratio >= -1.0e-6).all()
+		assert (ratio <= 1.0 + 1.0e-6).all()
+	np.testing.assert_allclose(low + mid + high, 1.0, atol=1.0e-4)
+
+
+def test_spectral_ratios_change_with_local_z_frequency_content() -> None:
+	z_size = 128
+	half = z_size // 2
+	first_z = np.arange(half, dtype=np.float32)
+	second_z = np.arange(half, dtype=np.float32)
+	trace = np.concatenate(
+		[
+			np.sin(2.0 * np.pi * 2.0 * first_z / half),
+			np.sin(2.0 * np.pi * 18.0 * second_z / half),
+		],
+	).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+	config = AttributeGenerationConfig(spectral_local_window_z=9)
+
+	low, _mid, high = _spectral_ratios(amp, config)
+
+	low_first = float(low[..., 8 : half - 8].mean())
+	high_first = float(high[..., 8 : half - 8].mean())
+	low_second = float(low[..., half + 8 : -8].mean())
+	high_second = float(high[..., half + 8 : -8].mean())
+	assert low_first > high_first
+	assert high_second > low_second
+
+
+def test_spectral_ratios_zero_input_is_finite_and_deterministic() -> None:
+	amp = np.zeros((2, 3, 16), dtype=np.float32)
+
+	low, mid, high = _spectral_ratios(amp, AttributeGenerationConfig())
+
+	for ratio in (low, mid, high):
+		assert np.isfinite(ratio).all()
+		np.testing.assert_array_equal(ratio, np.zeros_like(amp))
 
 
 def test_generate_mvp_attributes_zero_volume_has_zero_frequency() -> None:
