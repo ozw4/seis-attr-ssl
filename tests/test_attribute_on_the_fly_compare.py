@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
+import yaml
 
 from seis_attr_ssl.data import AttributeGenerationConfig, AttributeGenerationResult
 from seis_attr_ssl.visualization.attribute_on_the_fly_compare import (
 	OnTheFlyAttributeCompareConfig,
 	save_on_the_fly_attribute_comparison_pngs,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_visualization_passes_attribute_generation_config_to_on_the_fly_generator(
@@ -70,3 +68,21 @@ def test_visualization_passes_attribute_generation_config_to_on_the_fly_generato
 	assert calls == [attribute_generation_config, attribute_generation_config]
 	assert xy_png.exists()
 	assert xz_png.exists()
+
+
+def test_default_visualization_config_pins_revised_attribute_qc_defaults() -> None:
+	config_path = Path('proc/configs/visualize_attribute_on_the_fly_compare.yaml')
+	cfg = yaml.safe_load(config_path.read_text(encoding='utf-8'))
+
+	assert cfg['attribute_generation'] == {
+		'phase_reflect_pad_z': 64,
+		'phase_taper_fraction': 0.05,
+		'instantaneous_frequency_smooth_z': 5,
+		'instantaneous_frequency_envelope_quantile': 0.05,
+		'instantaneous_frequency_clip_percentile': 99.5,
+		'spectral_local_window_z': 65,
+		'spectral_remove_dc': True,
+	}
+	assert cfg['visualization']['grid_mode'] == 'auto'
+	assert cfg['visualization']['show_raw_amplitude'] is True
+	assert cfg['visualization']['use_known_ranges'] is True

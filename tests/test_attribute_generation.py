@@ -197,17 +197,22 @@ def test_generate_mvp_attributes_zero_volume_has_zero_frequency() -> None:
 	np.testing.assert_array_equal(instantaneous_frequency, np.zeros_like(amp))
 
 
-def test_generate_mvp_attributes_random_volume_frequency_is_finite() -> None:
+def test_generate_mvp_attributes_random_volume_contract_is_finite() -> None:
 	rng = np.random.default_rng(123)
 	amp = rng.normal(size=(3, 2, 24)).astype(np.float32)
 
 	result = generate_mvp_attributes(amp)
-	instantaneous_frequency = result.attributes[3]
 
-	assert instantaneous_frequency.shape == amp.shape
-	assert instantaneous_frequency.dtype == np.float32
-	assert np.isfinite(instantaneous_frequency).all()
-	assert (instantaneous_frequency >= 0.0).all()
+	assert result.attributes.shape == (10, *amp.shape)
+	assert result.attributes.dtype == np.float32
+	assert np.isfinite(result.attributes).all()
+	assert (result.attributes[1] >= -1.0).all()
+	assert (result.attributes[1] <= 1.0).all()
+	assert (result.attributes[2] >= -1.0).all()
+	assert (result.attributes[2] <= 1.0).all()
+	assert (result.attributes[3] >= 0.0).all()
+	assert (result.attributes[4:7] >= 0.0).all()
+	assert (result.attributes[4:7] <= 1.0).all()
 
 
 def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:

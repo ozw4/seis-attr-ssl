@@ -11,6 +11,10 @@ The MVP pretraining input set is controlled by the explicit path list used to
 build the NOPIMS manifest. Source seismic `.npy` memmaps listed there are the
 only volumes used for Stage 1. The target set is the seismic attribute registry
 in `proc/configs/mvp_mae.yaml`, generated on the fly during dataset sampling.
+Phase targets use reflect-padded z-axis Hilbert phase, instantaneous frequency
+uses a gated, smoothed, clipped z-phase gradient, and spectral ratio targets are
+local z-window energy ratios that may vary along z. The GLCM targets remain
+proxy texture channels.
 Precomputed 10-attribute `.npy` volumes are not required. External structural
 prediction attributes, such as fault, channel, salt, or horizon probability
 volumes, are not pretraining inputs or targets. The masked inpainting baseline

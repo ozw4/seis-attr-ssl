@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from seis_attr_ssl.training import load_checkpoint, save_checkpoint
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 
 def test_save_checkpoint_defaults_and_plain_config_values(tmp_path: Path) -> None:

@@ -78,6 +78,52 @@ attribute_names:
   - glcm_homogeneity
 ```
 
+## Attribute Meanings
+
+`amplitude_norm` is the survey-wise robust normalized source seismic amplitude
+used as the generator input.
+
+`phase_sin` and `phase_cos` are the sine and cosine of instantaneous phase from
+a Hilbert transform along the z axis. The transform uses reflect padding along z
+and an optional symmetric taper before trimming back to the requested crop, which
+reduces edge artifacts near crop boundaries.
+
+`instantaneous_frequency` is derived from the z-axis gradient of unwrapped phase,
+scaled to cycles per sample. It is envelope-gated, mean-smoothed along z, and
+robust-clipped so low-amplitude phase instability does not dominate the channel.
+The generated values are finite and non-negative after sanitization.
+
+`spectral_low_ratio`, `spectral_mid_ratio`, and `spectral_high_ratio` are local
+z-window spectral-energy ratios. They are not trace-global ratios: after
+frequency-band filtering, band energies are measured in a moving z window, so
+the ratios should vary along z when local frequency content changes. Where
+nonzero energy is present, the three ratios are expected to approximately sum to
+one.
+
+`coherence` is a deterministic finite-difference similarity proxy.
+`glcm_contrast` and `glcm_homogeneity` are quantized finite-difference texture
+proxies, not full gray-level co-occurrence matrix estimates.
+
+## Visualization QC
+
+The on-the-fly comparison config in
+`proc/configs/visualize_attribute_on_the_fly_compare.yaml` includes the
+recommended `attribute_generation` defaults for checking reflect-padded phase,
+stabilized instantaneous frequency, and local z-window spectral ratios. Use XZ
+views to confirm spectral ratios change along z where the source trace changes
+frequency content.
+
+When using `use_known_ranges: true`, do not judge `glcm_homogeneity` only from a
+fixed `[0, 1]` color range. The proxy can saturate near 1, so percentile-clipped
+or focused QC views may be needed to see useful contrast.
+
+## Known Limitations
+
+- These attributes are deterministic MVP approximations.
+- They are not a substitute for full commercial seismic attribute workflows.
+- `glcm_contrast` and `glcm_homogeneity` are still proxy texture attributes and
+  may need future replacement or rescaling.
+
 Precomputed MVP 10-attribute volumes are not required for pretraining. External
 structural prediction outputs are not used in the MVP, and the masked
 inpainting baseline is not part of the MVP.
