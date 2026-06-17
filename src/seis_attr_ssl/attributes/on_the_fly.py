@@ -2,8 +2,8 @@
 
 The MVP generator intentionally uses deterministic, dependency-light
 approximations. Phase and instantaneous frequency come from a NumPy FFT Hilbert
-transform along the z axis. Spectral ratios are whole-trace low/mid/high FFT
-energy fractions broadcast back over each trace. Coherence is a local
+transform along the z axis. Spectral ratios use FFT band-limited traces with
+local z-window energy ratios. Coherence is a local
 finite-difference similarity proxy, and GLCM texture channels are quantized
 finite-difference contrast/homogeneity proxies rather than full co-occurrence
 matrix estimates.
@@ -36,6 +36,13 @@ class AttributeGenerationConfig:
 	spectral_mid_max_fraction: float = 0.60
 	glcm_levels: int = 16
 	output_clip: float = 1.0e6
+	phase_reflect_pad_z: int = 64
+	phase_taper_fraction: float = 0.05
+	instantaneous_frequency_smooth_z: int = 5
+	instantaneous_frequency_envelope_quantile: float = 0.05
+	instantaneous_frequency_clip_percentile: float = 99.5
+	spectral_local_window_z: int = 65
+	spectral_remove_dc: bool = True
 
 	def validate(self) -> None:
 		"""Validate numeric generation settings."""
@@ -66,6 +73,53 @@ class AttributeGenerationConfig:
 				f'got {self.output_clip!r}'
 			)
 			raise ValueError(msg)
+		_validate_nonnegative_int(self.phase_reflect_pad_z, 'phase_reflect_pad_z')
+		if (
+			not isinstance(self.phase_taper_fraction, Real)
+			or not 0.0 <= self.phase_taper_fraction < 0.5
+		):
+			msg = (
+				'phase_taper_fraction must satisfy 0.0 <= fraction < 0.5; '
+				f'got {self.phase_taper_fraction!r}'
+			)
+			raise ValueError(msg)
+		_validate_odd_positive_int(
+			self.instantaneous_frequency_smooth_z,
+			'instantaneous_frequency_smooth_z',
+		)
+		if (
+			not isinstance(self.instantaneous_frequency_envelope_quantile, Real)
+			or not 0.0 <= self.instantaneous_frequency_envelope_quantile < 0.5
+		):
+			msg = (
+				'instantaneous_frequency_envelope_quantile must satisfy '
+				'0.0 <= quantile < 0.5; got '
+				f'{self.instantaneous_frequency_envelope_quantile!r}'
+			)
+			raise ValueError(msg)
+		if (
+			not isinstance(self.instantaneous_frequency_clip_percentile, Real)
+			or not 50.0 <= self.instantaneous_frequency_clip_percentile <= 100.0
+		):
+			msg = (
+				'instantaneous_frequency_clip_percentile must satisfy '
+				'50.0 <= percentile <= 100.0; got '
+				f'{self.instantaneous_frequency_clip_percentile!r}'
+			)
+			raise ValueError(msg)
+		_validate_odd_positive_int(
+			self.spectral_local_window_z,
+			'spectral_local_window_z',
+		)
+		if self.spectral_local_window_z < 3:
+			msg = (
+				'spectral_local_window_z must be an odd integer >= 3; '
+				f'got {self.spectral_local_window_z!r}'
+			)
+			raise ValueError(msg)
+		if not isinstance(self.spectral_remove_dc, bool):
+			msg = f'spectral_remove_dc must be a bool; got {self.spectral_remove_dc!r}'
+			raise TypeError(msg)
 
 
 @dataclass(frozen=True)
@@ -252,6 +306,120 @@ def _validate_payload_slices_xyz(
 	return slices_xyz
 
 
+def _validate_odd_positive_int(value: int, name: str) -> int:
+	"""Return value as int after validating it is odd and positive."""
+	if isinstance(value, bool):
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise TypeError(msg)
+	try:
+		integer = index(value)
+	except TypeError as exc:
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise TypeError(msg) from exc
+	if integer < 1 or integer % 2 == 0:
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _validate_nonnegative_int(value: int, name: str) -> int:
+	"""Return value as int after validating it is non-negative."""
+	if isinstance(value, bool):
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise TypeError(msg)
+	try:
+		integer = index(value)
+	except TypeError as exc:
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise TypeError(msg) from exc
+	if integer < 0:
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _safe_percentile(values: np.ndarray, percentile: float, default: float) -> float:
+	"""Compute a percentile over finite values, falling back when none exist."""
+	array = np.asarray(values, dtype=np.float32)
+	finite = array[np.isfinite(array)]
+	if finite.size == 0:
+		return float(default)
+	return float(np.percentile(finite, percentile))
+
+
+def _smooth_z_mean(array: np.ndarray, window_z: int) -> np.ndarray:
+	"""Mean-smooth a 3D [x, y, z] array along z while preserving shape."""
+	window = _validate_odd_positive_int(window_z, 'window_z')
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if values.shape[2] == 0 or window == 1:
+		return values.astype(np.float32, copy=True)
+	pad = window // 2
+	padded = np.pad(values, ((0, 0), (0, 0), (pad, pad)), mode='edge')
+	zero = np.zeros((*padded.shape[:2], 1), dtype=np.float32)
+	cumsum = np.cumsum(
+		np.concatenate((zero, padded), axis=2),
+		axis=2,
+		dtype=np.float32,
+	)
+	smoothed = (cumsum[..., window:] - cumsum[..., :-window]) / np.float32(window)
+	return smoothed.astype(np.float32, copy=False)
+
+
+def _hann_taper_z(array: np.ndarray, fraction: float) -> np.ndarray:
+	"""Apply a symmetric Hann taper to the leading/trailing z edges."""
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if not isinstance(fraction, Real) or not 0.0 <= fraction < 0.5:
+		msg = f'fraction must satisfy 0.0 <= fraction < 0.5; got {fraction!r}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
+	taper_size = int(np.floor(z_size * float(fraction)))
+	if taper_size < 1:
+		return values.astype(np.float32, copy=True)
+	window = np.ones(z_size, dtype=np.float32)
+	edge = np.hanning((2 * taper_size) + 2).astype(np.float32)[1 : taper_size + 1]
+	window[:taper_size] = edge
+	window[-taper_size:] = edge[::-1]
+	return (values * window.reshape(1, 1, z_size)).astype(np.float32, copy=False)
+
+
+def _reflect_pad_z(array: np.ndarray, pad_z: int) -> tuple[np.ndarray, int]:
+	"""Reflect-pad a 3D [x, y, z] array along z and return the applied pad."""
+	pad = _validate_nonnegative_int(pad_z, 'pad_z')
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if pad == 0 or values.shape[2] == 0:
+		return values.astype(np.float32, copy=True), 0
+	mode = 'reflect' if values.shape[2] > 1 else 'edge'
+	padded = np.pad(values, ((0, 0), (0, 0), (pad, pad)), mode=mode)
+	return padded.astype(np.float32, copy=False), pad
+
+
+def _unpad_z(array: np.ndarray, pad_z: int) -> np.ndarray:
+	"""Remove symmetric z padding from a 3D [x, y, z] array."""
+	pad = _validate_nonnegative_int(pad_z, 'pad_z')
+	values = np.asarray(array)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if pad == 0:
+		return values.copy()
+	if values.shape[2] < 2 * pad:
+		msg = (
+			'array z dimension is too small to remove requested padding; '
+			f'got z={values.shape[2]} and pad_z={pad}'
+		)
+		raise ValueError(msg)
+	return values[..., pad:-pad]
+
+
 def _gradient_magnitude(array: np.ndarray) -> np.ndarray:
 	grad_x = _gradient(array, axis=0)
 	grad_y = _gradient(array, axis=1)
@@ -339,8 +507,9 @@ def _phase_attributes(
 	amplitude: np.ndarray,
 	config: AttributeGenerationConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-	analytic = _hilbert_z(amplitude)
+	analytic = _hilbert_z(amplitude, config)
 	phase = np.unwrap(np.angle(analytic), axis=2).astype(np.float32, copy=False)
+	envelope = np.abs(analytic).astype(np.float32, copy=False)
 	phase_sin = np.sin(phase).astype(np.float32, copy=False)
 	phase_cos = np.cos(phase).astype(np.float32, copy=False)
 	if amplitude.shape[2] < 2:
@@ -349,6 +518,43 @@ def _phase_attributes(
 		instantaneous_frequency = (
 			np.abs(_gradient(phase, axis=2)) / np.float32(2.0 * np.pi)
 		).astype(np.float32, copy=False)
+	instantaneous_frequency = _smooth_z_mean(
+		instantaneous_frequency,
+		config.instantaneous_frequency_smooth_z,
+	)
+	envelope_threshold = _safe_percentile(
+		envelope,
+		config.instantaneous_frequency_envelope_quantile * 100.0,
+		default=np.inf,
+	)
+	if np.isfinite(envelope_threshold):
+		instantaneous_frequency = np.where(
+			envelope >= np.float32(envelope_threshold),
+			instantaneous_frequency,
+			np.float32(0.0),
+		)
+	else:
+		instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+	valid_if = instantaneous_frequency[
+		np.isfinite(instantaneous_frequency) & (instantaneous_frequency >= 0.0)
+	]
+	if valid_if.size == 0:
+		instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+	else:
+		clip_value = np.float32(
+			np.percentile(
+				valid_if,
+				config.instantaneous_frequency_clip_percentile,
+			),
+		)
+		if not np.isfinite(clip_value) or clip_value < 0.0:
+			instantaneous_frequency = np.zeros_like(amplitude, dtype=np.float32)
+		else:
+			instantaneous_frequency = np.clip(
+				instantaneous_frequency,
+				0.0,
+				clip_value,
+			).astype(np.float32, copy=False)
 	return (
 		_sanitize(phase_sin, config),
 		_sanitize(phase_cos, config),
@@ -356,7 +562,33 @@ def _phase_attributes(
 	)
 
 
-def _hilbert_z(amplitude: np.ndarray) -> np.ndarray:
+def _hilbert_z(
+	amplitude: np.ndarray,
+	config: AttributeGenerationConfig,
+) -> np.ndarray:
+	values = np.asarray(amplitude, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'amplitude must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
+	effective_pad = min(config.phase_reflect_pad_z, max(z_size - 1, 0))
+	if effective_pad == 0:
+		return _hilbert_z_unpadded(values)
+
+	padded, applied_pad = _reflect_pad_z(values, effective_pad)
+	if config.phase_taper_fraction > 0.0:
+		padded = _hann_taper_z(padded, config.phase_taper_fraction)
+	analytic = _unpad_z(_hilbert_z_unpadded(padded), applied_pad)
+	if analytic.shape != values.shape:
+		msg = (
+			'Hilbert analytic signal shape must match input shape; '
+			f'got {analytic.shape!r} and {values.shape!r}'
+		)
+		raise RuntimeError(msg)
+	return analytic
+
+
+def _hilbert_z_unpadded(amplitude: np.ndarray) -> np.ndarray:
 	z_size = amplitude.shape[2]
 	spectrum = np.fft.fft(amplitude, axis=2)
 	multiplier = np.zeros(z_size, dtype=np.float32)
@@ -374,15 +606,18 @@ def _spectral_ratios(
 	amplitude: np.ndarray,
 	config: AttributeGenerationConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-	z_size = amplitude.shape[2]
+	values = np.asarray(amplitude, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'amplitude must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
 	if z_size < 2:
-		zeros = np.zeros_like(amplitude, dtype=np.float32)
+		zeros = np.zeros_like(values, dtype=np.float32)
 		return zeros, zeros, zeros
 
-	spectrum = np.fft.rfft(amplitude, axis=2)
-	power = (
-		np.square(spectrum.real) + np.square(spectrum.imag)
-	).astype(np.float32, copy=False)
+	spectrum = np.fft.rfft(values, axis=2)
+	if config.spectral_remove_dc:
+		spectrum[..., 0] = 0.0
 	frequencies = np.fft.rfftfreq(z_size, d=1.0)
 	relative = frequencies / frequencies[-1]
 	low_mask = relative <= config.spectral_low_max_fraction
@@ -390,16 +625,56 @@ def _spectral_ratios(
 		relative <= config.spectral_mid_max_fraction
 	)
 	high_mask = relative > config.spectral_mid_max_fraction
-	total = power.sum(axis=2, keepdims=True, dtype=np.float32)
-	total = total + np.float32(config.eps)
-	low = power[..., low_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	mid = power[..., mid_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	high = power[..., high_mask].sum(axis=2, keepdims=True, dtype=np.float32) / total
-	return (
-		np.broadcast_to(low, amplitude.shape).astype(np.float32, copy=False),
-		np.broadcast_to(mid, amplitude.shape).astype(np.float32, copy=False),
-		np.broadcast_to(high, amplitude.shape).astype(np.float32, copy=False),
+
+	low_energy = _local_spectral_band_energy(
+		spectrum,
+		low_mask,
+		z_size,
+		config.spectral_local_window_z,
 	)
+	mid_energy = _local_spectral_band_energy(
+		spectrum,
+		mid_mask,
+		z_size,
+		config.spectral_local_window_z,
+	)
+	high_energy = _local_spectral_band_energy(
+		spectrum,
+		high_mask,
+		z_size,
+		config.spectral_local_window_z,
+	)
+	total = low_energy + mid_energy + high_energy + np.float32(config.eps)
+
+	return (
+		_sanitize_spectral_ratio(low_energy / total, config),
+		_sanitize_spectral_ratio(mid_energy / total, config),
+		_sanitize_spectral_ratio(high_energy / total, config),
+	)
+
+
+def _local_spectral_band_energy(
+	spectrum: np.ndarray,
+	bin_mask: np.ndarray,
+	z_size: int,
+	window_z: int,
+) -> np.ndarray:
+	if not bool(np.any(bin_mask)):
+		return np.zeros((*spectrum.shape[:2], z_size), dtype=np.float32)
+	band_spectrum = np.zeros_like(spectrum)
+	band_spectrum[..., bin_mask] = spectrum[..., bin_mask]
+	band_trace = np.fft.irfft(band_spectrum, n=z_size, axis=2).astype(
+		np.float32,
+		copy=False,
+	)
+	return _smooth_z_mean(np.square(band_trace), window_z)
+
+
+def _sanitize_spectral_ratio(
+	ratio: np.ndarray,
+	config: AttributeGenerationConfig,
+) -> np.ndarray:
+	return _sanitize(np.clip(ratio, 0.0, 1.0), config)
 
 
 def _quantize_for_texture(

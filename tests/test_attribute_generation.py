@@ -6,7 +6,15 @@ import numpy as np
 import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
+from seis_attr_ssl.attributes.on_the_fly import (
+	_hilbert_z,
+	_reflect_pad_z,
+	_smooth_z_mean,
+	_spectral_ratios,
+	_unpad_z,
+)
 from seis_attr_ssl.data import (
+	AttributeGenerationConfig,
 	AttributeGenerationResult,
 	BaseSeismicVolumeRecord,
 	SurveyManifest,
@@ -15,6 +23,59 @@ from seis_attr_ssl.data import (
 	generate_mvp_attributes_for_payload,
 )
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
+
+
+def test_attribute_generation_config_default_validates() -> None:
+	AttributeGenerationConfig().validate()
+
+
+@pytest.mark.parametrize(
+	'kwargs',
+	[
+		{'phase_reflect_pad_z': -1},
+		{'phase_taper_fraction': -0.01},
+		{'phase_taper_fraction': 0.5},
+		{'instantaneous_frequency_smooth_z': 0},
+		{'instantaneous_frequency_smooth_z': 4},
+		{'instantaneous_frequency_envelope_quantile': -0.01},
+		{'instantaneous_frequency_envelope_quantile': 0.5},
+		{'instantaneous_frequency_clip_percentile': 49.9},
+		{'instantaneous_frequency_clip_percentile': 100.1},
+		{'spectral_local_window_z': 1},
+		{'spectral_local_window_z': 4},
+		{'spectral_remove_dc': 1},
+	],
+)
+def test_attribute_generation_config_rejects_invalid_new_settings(
+	kwargs: dict[str, object],
+) -> None:
+	with pytest.raises((TypeError, ValueError)):
+		AttributeGenerationConfig(**kwargs).validate()
+
+
+def test_smooth_z_mean_preserves_shape_and_finite_values() -> None:
+	array = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
+
+	smoothed = _smooth_z_mean(array, 5)
+
+	assert smoothed.shape == array.shape
+	assert smoothed.dtype == np.float32
+	assert np.isfinite(smoothed).all()
+
+
+@pytest.mark.parametrize(('shape', 'pad_z'), [((2, 3, 5), 2), ((2, 3, 1), 3)])
+def test_reflect_pad_z_then_unpad_z_recovers_original(
+	shape: tuple[int, int, int],
+	pad_z: int,
+) -> None:
+	array = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+
+	padded, applied_pad = _reflect_pad_z(array, pad_z)
+	recovered = _unpad_z(padded, applied_pad)
+
+	assert padded.shape == (shape[0], shape[1], shape[2] + (2 * pad_z))
+	assert recovered.shape == array.shape
+	np.testing.assert_array_equal(recovered, array)
 
 
 def test_generate_mvp_attributes_constant_cube_contract() -> None:
@@ -28,10 +89,12 @@ def test_generate_mvp_attributes_constant_cube_contract() -> None:
 	assert result.voxel_valid_mask.shape == amp.shape
 	np.testing.assert_array_equal(result.attribute_valid, np.ones(10, dtype=bool))
 	np.testing.assert_allclose(result.attributes[0], amp)
-	np.testing.assert_allclose(result.attributes[1], 0.0, atol=1.0e-6)
-	np.testing.assert_allclose(result.attributes[2], 1.0, atol=1.0e-6)
-	np.testing.assert_allclose(result.attributes[3], 0.0, atol=1.0e-6)
-	np.testing.assert_allclose(result.attributes[4], 1.0, atol=1.0e-5)
+	assert (result.attributes[1] >= -1.0).all()
+	assert (result.attributes[1] <= 1.0).all()
+	assert (result.attributes[2] >= -1.0).all()
+	assert (result.attributes[2] <= 1.0).all()
+	assert (result.attributes[3] >= 0.0).all()
+	np.testing.assert_allclose(result.attributes[4:7], 0.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[7], 1.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[8], 0.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[9], 1.0, atol=1.0e-6)
@@ -56,6 +119,97 @@ def test_generate_mvp_attributes_ramp_along_z_is_finite() -> None:
 	)
 
 
+def test_spectral_ratios_return_input_shape_and_float32_dtype() -> None:
+	rng = np.random.default_rng(123)
+	amp = rng.normal(size=(3, 2, 32)).astype(np.float32)
+	config = AttributeGenerationConfig(spectral_local_window_z=7)
+
+	low, mid, high = _spectral_ratios(amp, config)
+
+	for ratio in (low, mid, high):
+		assert ratio.shape == amp.shape
+		assert ratio.dtype == np.float32
+
+
+def test_spectral_ratios_are_finite_bounded_and_sum_to_one_for_energy() -> None:
+	z_size = 64
+	z = np.arange(z_size, dtype=np.float32)
+	trace = (
+		np.sin(2.0 * np.pi * 4.0 * z / z_size)
+		+ np.float32(0.5) * np.sin(2.0 * np.pi * 20.0 * z / z_size)
+	).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 3, z_size)).copy()
+	config = AttributeGenerationConfig(spectral_local_window_z=9)
+
+	low, mid, high = _spectral_ratios(amp, config)
+
+	for ratio in (low, mid, high):
+		assert np.isfinite(ratio).all()
+		assert (ratio >= -1.0e-6).all()
+		assert (ratio <= 1.0 + 1.0e-6).all()
+	np.testing.assert_allclose(low + mid + high, 1.0, atol=1.0e-4)
+
+
+def test_spectral_ratios_change_with_local_z_frequency_content() -> None:
+	z_size = 128
+	half = z_size // 2
+	first_z = np.arange(half, dtype=np.float32)
+	second_z = np.arange(half, dtype=np.float32)
+	trace = np.concatenate(
+		[
+			np.sin(2.0 * np.pi * 2.0 * first_z / half),
+			np.sin(2.0 * np.pi * 18.0 * second_z / half),
+		],
+	).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+	config = AttributeGenerationConfig(spectral_local_window_z=9)
+
+	low, _mid, high = _spectral_ratios(amp, config)
+
+	low_first = float(low[..., 8 : half - 8].mean())
+	high_first = float(high[..., 8 : half - 8].mean())
+	low_second = float(low[..., half + 8 : -8].mean())
+	high_second = float(high[..., half + 8 : -8].mean())
+	assert low_first > high_first
+	assert high_second > low_second
+
+
+def test_spectral_ratios_zero_input_is_finite_and_deterministic() -> None:
+	amp = np.zeros((2, 3, 16), dtype=np.float32)
+
+	low, mid, high = _spectral_ratios(amp, AttributeGenerationConfig())
+
+	for ratio in (low, mid, high):
+		assert np.isfinite(ratio).all()
+		np.testing.assert_array_equal(ratio, np.zeros_like(amp))
+
+
+def test_generate_mvp_attributes_zero_volume_has_zero_frequency() -> None:
+	amp = np.zeros((2, 3, 16), dtype=np.float32)
+
+	result = generate_mvp_attributes(amp)
+	instantaneous_frequency = result.attributes[3]
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert result.attributes.dtype == np.float32
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	np.testing.assert_array_equal(instantaneous_frequency, np.zeros_like(amp))
+
+
+def test_generate_mvp_attributes_random_volume_frequency_is_finite() -> None:
+	rng = np.random.default_rng(123)
+	amp = rng.normal(size=(3, 2, 24)).astype(np.float32)
+
+	result = generate_mvp_attributes(amp)
+	instantaneous_frequency = result.attributes[3]
+
+	assert instantaneous_frequency.shape == amp.shape
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	assert (instantaneous_frequency >= 0.0).all()
+
+
 def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	z_size = 32
 	z = np.arange(z_size, dtype=np.float32)
@@ -68,6 +222,87 @@ def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	assert float(result.attributes[3].mean()) > 0.0
 	assert float(result.attributes[4].mean()) > float(result.attributes[5].mean())
 	assert float(result.attributes[4].mean()) > float(result.attributes[6].mean())
+
+
+def test_generate_mvp_attributes_low_envelope_noisy_tail_is_suppressed() -> None:
+	rng = np.random.default_rng(123)
+	z_size = 128
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 4.0 * z / z_size).astype(np.float32)
+	trace[-32:] = (1.0e-4 * rng.standard_normal(32)).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+	config = AttributeGenerationConfig(
+		phase_reflect_pad_z=16,
+		instantaneous_frequency_smooth_z=3,
+		instantaneous_frequency_envelope_quantile=0.49,
+		instantaneous_frequency_clip_percentile=90.0,
+	)
+
+	result = generate_mvp_attributes(amp, config=config)
+	instantaneous_frequency = result.attributes[3]
+
+	assert instantaneous_frequency.shape == amp.shape
+	assert instantaneous_frequency.dtype == np.float32
+	assert np.isfinite(instantaneous_frequency).all()
+	assert (instantaneous_frequency >= 0.0).all()
+	np.testing.assert_allclose(instantaneous_frequency[..., -32:], 0.0)
+	assert float(instantaneous_frequency[..., :-32].max()) > 0.0
+
+
+def test_hilbert_z_reflect_padding_preserves_original_shape() -> None:
+	z_size = 16
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 2.0 * z / z_size).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 3, z_size)).copy()
+	config = AttributeGenerationConfig(
+		phase_reflect_pad_z=8,
+		phase_taper_fraction=0.1,
+	)
+
+	analytic = _hilbert_z(amp, config)
+
+	assert analytic.shape == amp.shape
+	assert np.isfinite(analytic.real).all()
+	assert np.isfinite(analytic.imag).all()
+
+
+def test_generate_mvp_attributes_sinusoid_phase_is_finite_and_bounded() -> None:
+	z_size = 32
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 3.0 * z / z_size).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (3, 2, z_size)).copy()
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert np.isfinite(result.attributes).all()
+	assert (result.attributes[1] >= -1.0).all()
+	assert (result.attributes[1] <= 1.0).all()
+	assert (result.attributes[2] >= -1.0).all()
+	assert (result.attributes[2] <= 1.0).all()
+
+
+def test_generate_mvp_attributes_near_constant_phase_is_finite() -> None:
+	z_size = 12
+	z = np.linspace(-1.0, 1.0, z_size, dtype=np.float32)
+	trace = np.ones(z_size, dtype=np.float32) + (z * np.float32(1.0e-7))
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert np.isfinite(result.attributes).all()
+
+
+@pytest.mark.parametrize('z_size', [1, 2, 4])
+def test_generate_mvp_attributes_short_z_sizes_do_not_crash(z_size: int) -> None:
+	amp = np.ones((2, 3, z_size), dtype=np.float32)
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert result.attributes.dtype == np.float32
+	assert np.isfinite(result.attributes).all()
 
 
 def test_generate_mvp_attributes_zeroes_invalid_padded_voxels() -> None:
