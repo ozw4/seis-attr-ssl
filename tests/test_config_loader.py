@@ -41,6 +41,13 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['data']['require_full_halo_inside_volume'] is True
 	assert cfg['attribute_generation']['spectral_local_window_z'] == 65
 	assert cfg['attribute_generation']['spectral_remove_dc'] is True
+	assert cfg['attribute_generation']['zero_mask'] == {
+		'enabled': True,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 64,
+		'xy_trace_influence_radius': 1,
+		'z_trace_influence_radius': 0,
+	}
 	assert len(cfg['attributes']['names']) == 10
 	assert cfg['train']['samples_per_epoch'] == 10000
 	assert cfg['train']['num_workers'] == 4

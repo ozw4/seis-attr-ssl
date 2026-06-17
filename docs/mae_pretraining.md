@@ -43,6 +43,9 @@ The training loss also uses `target_valid: [B, A]` and
 valid attributes withheld from the encoder input. When context is enabled, the
 batch may include `context: [B, C, X, Y, Z]` and
 `context_valid_mask: [B, X, Y, Z]`.
+The batch also carries `local_valid_mask: [B, X, Y, Z]`; reconstruction and
+gradient losses exclude invalid voxels from the zero-amplitude valid-mask
+workflow.
 
 For the default config, local crops are `[128, 128, 128]`, context crops are
 `[256, 256, 512]`, context downsampling is `[2, 2, 4]`, patch size is
@@ -64,6 +67,26 @@ Context can be disabled for local-only experiments with:
 data:
   use_context: false
 ```
+
+## Zero-Amplitude Valid Mask
+
+The on-the-fly generator marks invalid voxels before MAE masking. The MVP mask
+invalidates all-zero z samples, all-zero traces, and the configured influence
+neighborhood around those regions:
+
+```yaml
+attribute_generation:
+  zero_mask:
+    enabled: true
+    zero_atol: 0.0
+    z_sample_influence_radius: 64
+    xy_trace_influence_radius: 1
+    z_trace_influence_radius: 0
+```
+
+Low S/N nonzero regions are not automatically masked. `amplitude_norm` remains a
+normal displayable attribute, but voxels marked invalid are excluded from MAE
+reconstruction loss through `local_valid_mask`.
 
 ## Dataset Sampling
 

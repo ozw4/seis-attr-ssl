@@ -178,7 +178,10 @@ def generate_mvp_attributes(
 		valid_mask=base_valid_mask,
 		config=cfg.zero_mask,
 	)
-	voxel_valid_mask = np.logical_and(base_valid_mask, np.logical_not(zero_invalid_mask))
+	voxel_valid_mask = np.logical_and(
+		base_valid_mask,
+		np.logical_not(zero_invalid_mask),
+	)
 
 	phase_sin, phase_cos, instantaneous_frequency = _phase_attributes(
 		amplitude,
