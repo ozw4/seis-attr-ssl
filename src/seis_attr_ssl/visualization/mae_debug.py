@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -546,6 +546,7 @@ def _plot_panels(  # noqa: PLR0913
 	aspect: str,
 	config: MaeDebugVisualizationConfig,
 ) -> None:
+	plt = _load_pyplot()
 	n_panels = len(panels)
 	nrows, ncols = _resolve_grid(n_panels, len(config.columns), config.grid_mode)
 	fig, axes = plt.subplots(
@@ -567,7 +568,7 @@ def _plot_panels(  # noqa: PLR0913
 			image,
 			origin='upper',
 			aspect=aspect,
-			cmap=_cmap_for_panel(panel, config),
+			cmap=_cmap_for_panel(panel, config, plt),
 			vmin=vmin,
 			vmax=vmax,
 		)
@@ -583,6 +584,10 @@ def _plot_panels(  # noqa: PLR0913
 	out_path.parent.mkdir(parents=True, exist_ok=True)
 	fig.savefig(out_path, dpi=config.dpi, bbox_inches='tight')
 	plt.close(fig)
+
+
+def _load_pyplot() -> object:
+	return importlib.import_module('matplotlib.pyplot')
 
 
 def _resolve_grid(
@@ -653,7 +658,8 @@ def _display_image(
 def _cmap_for_panel(
 	panel: _Panel,
 	config: MaeDebugVisualizationConfig,
-) -> str | plt.Colormap:
+	pyplot: object,
+) -> str | object:
 	name = panel.range_name or panel.title
 	if name in {'local_valid_mask', 'spatial_mask_voxel'}:
 		return 'gray'
@@ -664,7 +670,7 @@ def _cmap_for_panel(
 		or panel.valid_mask.all()
 	):
 		return cmap_name
-	cmap = plt.get_cmap(cmap_name).copy()
+	cmap = pyplot.get_cmap(cmap_name).copy()
 	cmap.set_bad(config.invalid_color)
 	return cmap
 
