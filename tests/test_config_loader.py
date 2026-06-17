@@ -13,6 +13,7 @@ DEFAULT_CONFIGS = [
 	Path('proc/configs/mvp_prepare_stats.yaml'),
 	Path('proc/configs/generate_attributes_nopims.yaml'),
 	Path('proc/configs/mvp_mae.yaml'),
+	Path('proc/configs/mvp_mae_phase75_stable.yaml'),
 	Path('proc/configs/mvp_dense_adapt.yaml'),
 	Path('proc/configs/mvp_finetune_f3.yaml'),
 	Path('proc/configs/mvp_eval_f3.yaml'),
@@ -58,6 +59,27 @@ def test_default_mvp_configs_load_and_validate(config_path: Path) -> None:
 		]
 		is False
 	)
+
+
+def test_phase75_stable_config_loads_and_keeps_pilot_steps_cli_controlled() -> None:
+	cfg = load_config(Path('proc/configs/mvp_mae_phase75_stable.yaml'))
+
+	validate_config(cfg)
+
+	assert cfg['stage'] == 'pretrain_mae'
+	assert (
+		cfg['manifests']['train']
+		== 'registry/manifests/nopims/pretrain_v1_clean/'
+		'nopims_base_seismic_manifests.json'
+	)
+	assert (
+		cfg['paths']['output_root']
+		== 'runs/mae_nopims_pretrain_v1_clean_phase75'
+	)
+	assert cfg['train']['grad_clip_norm'] == 1.0
+	assert cfg['train']['checkpoint_every_steps'] == 1000
+	assert cfg['train']['diagnostics_dir'] == 'diagnostics'
+	assert 'max_steps' not in cfg['train']
 
 
 def test_load_config_applies_nopims_root_default(tmp_path: Path) -> None:

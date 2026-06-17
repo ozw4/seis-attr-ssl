@@ -16,6 +16,7 @@ part of the required review validation command set.
 
 - [MVP specification](docs/mvp_spec.md)
 - [Strict MAE pretraining](docs/mae_pretraining.md)
+- [Phase 7.5 stable MAE pilot](docs/mae_pretraining.md#phase-75-stable-pilot)
 - [Data format](docs/data_format.md)
 - [Attribute generation](docs/attribute_generation.md)
 - [Masking contract](docs/masking.md)

@@ -55,6 +55,30 @@ def test_train_mae_dry_run_prints_masking_settings() -> None:
 	assert 'train.shuffle: true' in result.stdout
 
 
+def test_train_mae_phase75_stable_dry_run_prints_operational_settings() -> None:
+	result = run_python_proc(
+		Path('proc/train_mae.py'),
+		'--config',
+		Path('proc/configs/mvp_mae_phase75_stable.yaml'),
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert (
+		'manifests.train: '
+		'registry/manifests/nopims/pretrain_v1_clean/'
+		'nopims_base_seismic_manifests.json'
+	) in result.stdout
+	assert (
+		'paths.output_root: runs/mae_nopims_pretrain_v1_clean_phase75'
+		in result.stdout
+	)
+	assert 'train.grad_clip_norm: 1.0' in result.stdout
+	assert 'train.checkpoint_every_steps: 1000' in result.stdout
+	assert 'train.diagnostics_dir: diagnostics' in result.stdout
+	assert 'train.max_steps:' not in result.stdout
+
+
 def test_train_mae_help_includes_resume() -> None:
 	result = run_python_proc(Path('proc/train_mae.py'), '--help')
 

@@ -120,6 +120,94 @@ python proc/prepare_nopims_normalization_stats.py \
   --config proc/configs/mvp_prepare_nopims_stats.yaml
 ```
 
+## Phase 7.5 Stable Pilot
+
+Phase 7.5 uses `proc/configs/mvp_mae_phase75_stable.yaml` for A100-oriented
+clean-manifest pilot runs. The config pins the clean manifest path, output
+directory, gradient clipping with `train.grad_clip_norm: 1.0`, step checkpoints
+with `train.checkpoint_every_steps: 1000`, and non-finite diagnostic output
+under `train.diagnostics_dir: diagnostics`. It intentionally omits
+`train.max_steps`; set pilot length from the CLI.
+
+Generate normalization stats:
+
+```bash
+python proc/prepare_nopims_normalization_stats.py \
+  --config proc/configs/mvp_prepare_nopims_stats.yaml
+```
+
+Run stats QC and generate the clean manifest/split:
+
+```bash
+python proc/filter_nopims_manifest_by_stats_qc.py \
+  --manifest registry/manifests/nopims/pretrain_v1/nopims_base_seismic_manifests.json \
+  --input-path-list registry/splits/nopims/pretrain_v1/train_npy_paths.txt \
+  --nopims-root /home/dcuser/data/NOPIMS \
+  --output-qc-json registry/qc/nopims/pretrain_v1/normalization_stats_qc.json \
+  --output-excluded-surveys registry/qc/nopims/pretrain_v1/excluded_surveys.txt \
+  --output-manifest registry/manifests/nopims/pretrain_v1_clean/nopims_base_seismic_manifests.json \
+  --output-path-list registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt \
+  --iqr-min-threshold 1.0e-6 \
+  --norm-abs-max-threshold 1.0e4
+```
+
+Confirm the stable config resolves to the clean manifest without touching data:
+
+```bash
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae_phase75_stable.yaml \
+  --dry-run
+```
+
+Run a 1000-step pilot:
+
+```bash
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae_phase75_stable.yaml \
+  --max-steps 1000
+```
+
+Resume from the latest checkpoint and continue to 10000 global steps:
+
+```bash
+python proc/train_mae.py \
+  --config proc/configs/mvp_mae_phase75_stable.yaml \
+  --resume runs/mae_nopims_pretrain_v1_clean_phase75/mae_latest.pt \
+  --max-steps 10000
+```
+
+If a non-finite loss or gradient is detected, inspect:
+
+```text
+runs/mae_nopims_pretrain_v1_clean_phase75/diagnostics/nonfinite_mae_step_*.json
+```
+
+Record these fields when triaging the diagnostic JSON:
+
+- `survey_id`
+- `local_start_xyz`
+- `local_compute_start_xyz`
+- `context_compute_start_xyz`
+- `attribute_ids`
+- `losses`
+- `tensors.x.all_finite`
+- `tensors.target.all_finite`
+- `tensors.context.all_finite`
+- `tensors.pred_patches.all_finite`
+
+Pilot checklist:
+
+```text
+[ ] normalization_stats_qc.json の excluded_surveys を確認した
+[ ] clean manifest の survey count が 0 ではない
+[ ] train dry-run が clean manifest path を指している
+[ ] 1000 step pilot で NaN/Inf loss が出ない
+[ ] mae_latest.pt が保存される
+[ ] --resume mae_latest.pt で global_step が継続する
+[ ] 10000 step pilot で loss が finite のまま推移する
+[ ] diagnostics/ に nonfinite JSON が出ていない、または出た場合に原因 survey を特定できる
+```
+
 Smoke-test MAE pretraining:
 
 ```bash
