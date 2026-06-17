@@ -49,7 +49,12 @@ visualization:
 
   # 属性数とraw amplitude表示に合わせて自動でgridを選びます。
   show_raw_amplitude: true
+  show_valid_mask: true
+  mask_invalid_values: true
+  invalid_color: lightgray
   grid_mode: auto
+
+  # valid_mask panel convention: 1 = valid voxel, 0 = invalid voxel.
 
   # raw amplitudeも含めたい場合は次に変更:
   # show_raw_amplitude: true
