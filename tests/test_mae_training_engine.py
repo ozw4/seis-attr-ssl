@@ -158,6 +158,19 @@ def test_one_epoch_cpu_training_writes_loadable_checkpoint(tmp_path: Path) -> No
 	assert np.isfinite(loss)
 
 
+def test_one_epoch_cpu_training_records_grad_norm_when_clipping_enabled(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['grad_clip_norm'] = 1.0
+
+	checkpoint_path = run_mae_pretraining(cfg)
+	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert 'grad_norm' in checkpoint['metrics']
+	assert np.isfinite(checkpoint['metrics']['grad_norm'])
+
+
 def test_run_mae_pretraining_sets_dataset_epoch_each_epoch(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -308,6 +321,52 @@ def test_nonfinite_mae_loss_writes_diagnostic_json(
 		'spatial_mask',
 		'dropped_attribute_mask',
 	}
+
+
+def test_grad_clip_norm_calls_torch_clip_on_cpu(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls: list[float] = []
+
+	def fake_clip_grad_norm_(
+		parameters: object,
+		max_norm: float,
+	) -> torch.Tensor:
+		list(parameters)
+		calls.append(max_norm)
+		return torch.tensor(0.25)
+
+	monkeypatch.setattr(torch.nn.utils, 'clip_grad_norm_', fake_clip_grad_norm_)
+	sample = _mae_sample(
+		attribute_ids=(0, 2),
+		coords={
+			'survey_id': 'survey-a',
+			'local_start_xyz': (1, 2, 3),
+			'local_compute_start_xyz': (1, 2, 3),
+			'context_compute_start_xyz': None,
+		},
+	)
+	dataloader = torch.utils.data.DataLoader(
+		[sample],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyMaeModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+	state = train_mae_one_epoch(
+		model=model,
+		dataloader=dataloader,
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config={'reconstruction': 'mse'},
+		grad_clip_norm=1.0,
+	)
+
+	assert calls == [1.0]
+	assert state.metrics['grad_norm'] == pytest.approx(0.25)
 
 
 def _mae_sample(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from seis_attr_ssl.training.collate import move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
 from seis_attr_ssl.training.diagnostics import (
 	build_mae_nonfinite_diagnostic,
+	summarize_tensor,
 	write_json_diagnostic,
 )
 from seis_attr_ssl.training.logging import print_epoch_metrics
@@ -41,7 +43,7 @@ class MaeTrainingState:
 	amp_enabled: bool
 
 
-def train_mae_one_epoch(  # noqa: PLR0913
+def train_mae_one_epoch(  # noqa: C901, PLR0913
 	*,
 	model: torch.nn.Module,
 	dataloader: torch.utils.data.DataLoader,
@@ -55,6 +57,7 @@ def train_mae_one_epoch(  # noqa: PLR0913
 	global_step: int = 0,
 	max_steps: int | None = None,
 	diagnostics_dir: Path | None = None,
+	grad_clip_norm: float | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
@@ -122,10 +125,51 @@ def train_mae_one_epoch(  # noqa: PLR0913
 				msg = 'scaler is required when amp_enabled is true'
 				raise ValueError(msg)
 			scaler.scale(loss).backward()
+			if grad_clip_norm is not None:
+				scaler.unscale_(optimizer)
+				grad_norm = torch.nn.utils.clip_grad_norm_(
+					model.parameters(),
+					grad_clip_norm,
+				)
+				_check_finite_grad_norm(
+					grad_norm=grad_norm,
+					model=model,
+					global_step=global_step,
+					epoch=epoch,
+					batch_index=batch_index,
+					batch=batch,
+					output=output,
+					losses=losses,
+					amp_enabled=amp_enabled,
+					diagnostics_dir=diagnostics_dir,
+				)
+				totals['grad_norm'] = totals.get('grad_norm', 0.0) + _grad_norm_float(
+					grad_norm,
+				)
 			scaler.step(optimizer)
 			scaler.update()
 		else:
 			loss.backward()
+			if grad_clip_norm is not None:
+				grad_norm = torch.nn.utils.clip_grad_norm_(
+					model.parameters(),
+					grad_clip_norm,
+				)
+				_check_finite_grad_norm(
+					grad_norm=grad_norm,
+					model=model,
+					global_step=global_step,
+					epoch=epoch,
+					batch_index=batch_index,
+					batch=batch,
+					output=output,
+					losses=losses,
+					amp_enabled=amp_enabled,
+					diagnostics_dir=diagnostics_dir,
+				)
+				totals['grad_norm'] = totals.get('grad_norm', 0.0) + _grad_norm_float(
+					grad_norm,
+				)
 			optimizer.step()
 
 		for key, value in losses.items():
@@ -188,6 +232,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 	diagnostics_dir = _resolve_diagnostics_dir(train_config, output_root)
 	epochs = _int_config(train_config, 'epochs', 1)
 	max_steps = _optional_int_config(train_config, 'max_steps')
+	grad_clip_norm = _optional_positive_float_config(train_config, 'grad_clip_norm')
 	state: MaeTrainingState | None = None
 	checkpoint_path: Path | None = None
 	for epoch in range(1, epochs + 1):
@@ -213,6 +258,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			global_step=0 if state is None else state.global_step,
 			max_steps=remaining_steps,
 			diagnostics_dir=diagnostics_dir,
+			grad_clip_norm=grad_clip_norm,
 		)
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_path = save_checkpoint(
@@ -340,6 +386,62 @@ def _looks_like_f3_path(value: str) -> bool:
 	return any(part == 'f3' or part.startswith('f3_') for part in parts)
 
 
+def _check_finite_grad_norm(  # noqa: PLR0913
+	*,
+	grad_norm: torch.Tensor,
+	model: torch.nn.Module,
+	global_step: int,
+	epoch: int,
+	batch_index: int,
+	batch: Mapping[str, object],
+	output: Mapping[str, object],
+	losses: Mapping[str, torch.Tensor],
+	amp_enabled: bool,
+	diagnostics_dir: Path | None,
+) -> None:
+	if _is_finite_grad_norm(grad_norm):
+		return
+
+	if diagnostics_dir is not None:
+		diagnostic = build_mae_nonfinite_diagnostic(
+			global_step=global_step,
+			epoch=epoch,
+			batch_index=batch_index,
+			batch=batch,
+			output=output,
+			losses=losses,
+			torch_amp_enabled=amp_enabled,
+		)
+		diagnostic['grad_norm'] = summarize_tensor(grad_norm)
+		diagnostic['gradients'] = _summarize_gradients(model)
+		diagnostic_path = write_json_diagnostic(
+			diagnostic,
+			diagnostics_dir / f'nonfinite_mae_grad_step_{global_step:08d}.json',
+		)
+		msg = (
+			f'non-finite MAE gradient norm at epoch {epoch}, step {global_step}; '
+			f'diagnostic written to {diagnostic_path}'
+		)
+	else:
+		msg = f'non-finite MAE gradient norm at epoch {epoch}, step {global_step}'
+	raise FloatingPointError(msg)
+
+
+def _is_finite_grad_norm(grad_norm: torch.Tensor) -> bool:
+	return bool(torch.isfinite(grad_norm.detach()).all().cpu().item())
+
+
+def _grad_norm_float(grad_norm: torch.Tensor) -> float:
+	return float(grad_norm.detach().float().cpu().item())
+
+
+def _summarize_gradients(model: torch.nn.Module) -> dict[str, object]:
+	return {
+		name: summarize_tensor(parameter.grad)
+		for name, parameter in model.named_parameters()
+	}
+
+
 def _required_tensor(
 	mapping: Mapping[str, object],
 	key: str,
@@ -406,6 +508,23 @@ def _float_config(parent: Mapping[str, object], key: str, default: float) -> flo
 		msg = f'{key} must be a float; got {value!r}'
 		raise TypeError(msg)
 	return float(value)
+
+
+def _optional_positive_float_config(
+	parent: Mapping[str, object],
+	key: str,
+) -> float | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, float | int) or isinstance(value, bool):
+		msg = f'{key} must be a float; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if not math.isfinite(number) or number <= 0.0:
+		msg = f'{key} must be finite and positive; got {value!r}'
+		raise ValueError(msg)
+	return number
 
 
 def _fraction_config(parent: Mapping[str, object], key: str, default: float) -> float:
