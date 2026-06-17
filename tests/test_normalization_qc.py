@@ -151,6 +151,34 @@ def test_evaluate_stats_file_reports_invalid_stats(tmp_path: Path) -> None:
 	assert item.error is not None
 
 
+def test_evaluate_stats_file_uses_explicit_survey_id_for_item(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'survey-a.normalization_stats.json'
+	write_normalization_stats(
+		_stats(
+			survey_id='survey-b',
+			clip_low=-1.0e-8,
+			clip_high=1.0e-8,
+			median=0.0,
+			iqr=1.0e-8,
+		),
+		path,
+	)
+
+	item = evaluate_normalization_stats_file(
+		path,
+		survey_id='survey-a',
+		source_path=tmp_path / 'survey-a.npy',
+		thresholds=NormalizationStatsQcThresholds(iqr_min=1.0e-6),
+	)
+
+	assert item.status == 'exclude'
+	assert item.survey_id == 'survey-a'
+	assert item.source_path == tmp_path / 'survey-a.npy'
+	assert item.exclude_reasons == ('small_iqr',)
+
+
 def test_normalization_qc_report_to_dict_is_strict_json_compatible(
 	tmp_path: Path,
 ) -> None:

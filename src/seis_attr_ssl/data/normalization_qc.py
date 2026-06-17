@@ -75,6 +75,7 @@ def evaluate_normalization_stats(
 		stats,
 		stats_path=Path(stats_path),
 		source_path=stats.source_path,
+		survey_id=None,
 		thresholds=thresholds,
 	)
 
@@ -115,6 +116,7 @@ def evaluate_normalization_stats_file(
 		stats,
 		stats_path=path,
 		source_path=resolved_source_path or stats.source_path,
+		survey_id=survey_id,
 		thresholds=thresholds,
 	)
 
@@ -151,6 +153,7 @@ def _evaluate_loaded_normalization_stats(
 	*,
 	stats_path: Path,
 	source_path: Path | None,
+	survey_id: str | None,
 	thresholds: NormalizationStatsQcThresholds,
 ) -> NormalizationStatsQcItem:
 	non_finite_fields = [
@@ -184,7 +187,7 @@ def _evaluate_loaded_normalization_stats(
 		reason for reason in _EXCLUDE_REASON_ORDER if reason in reasons
 	)
 	return NormalizationStatsQcItem(
-		survey_id=stats.survey_id,
+		survey_id=survey_id or stats.survey_id,
 		stats_path=stats_path,
 		source_path=source_path,
 		status='exclude' if exclude_reasons else 'pass',

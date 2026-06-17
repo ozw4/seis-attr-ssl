@@ -120,6 +120,47 @@ def test_filter_nopims_manifest_by_stats_qc_missing_stats_excludes_survey(
 	assert outputs['path_list'].read_text(encoding='utf-8') == ''
 
 
+def test_filter_nopims_manifest_by_stats_qc_excludes_manifest_survey_on_id_mismatch(
+	tmp_path: Path,
+) -> None:
+	root = tmp_path / 'NOPIMS'
+	manifest_path = tmp_path / 'manifest.json'
+	path_list = tmp_path / 'train_npy_paths.txt'
+	outputs = _outputs(tmp_path)
+	for survey_id in ('survey-a', 'survey-b'):
+		_write_volume(root, survey_id)
+	_write_stats(
+		root,
+		'survey-a',
+		stats_survey_id='survey-b',
+		iqr=1.0e-8,
+		clip_low=-1.0e-8,
+		clip_high=1.0e-8,
+	)
+	_write_stats(root, 'survey-b')
+	write_manifest_json(
+		[_manifest(root, 'survey-a'), _manifest(root, 'survey-b')],
+		manifest_path,
+	)
+	path_list.write_text('survey-a.npy\nsurvey-b.npy\n', encoding='utf-8')
+
+	result = run_python_proc(
+		SCRIPT,
+		*_args(root, manifest_path, path_list, outputs),
+	)
+
+	assert result.returncode == 0, result.stderr
+	report = json.loads(outputs['qc_json'].read_text(encoding='utf-8'))
+	assert report['excluded_surveys'] == ['survey-a']
+	assert [survey['survey_id'] for survey in report['surveys']] == [
+		'survey-a',
+		'survey-b',
+	]
+	clean_manifest = read_manifest_json(outputs['manifest'])
+	assert [manifest.survey_id for manifest in clean_manifest] == ['survey-b']
+	assert outputs['path_list'].read_text(encoding='utf-8') == 'survey-b.npy\n'
+
+
 def test_filter_nopims_manifest_by_stats_qc_fail_if_empty(
 	tmp_path: Path,
 ) -> None:
@@ -244,12 +285,14 @@ def _write_stats(
 	clip_low: float = -2.0,
 	clip_high: float = 6.0,
 	iqr: float = 2.0,
+	stats_survey_id: str | None = None,
 ) -> Path:
 	path = root / f'{survey_id}.normalization_stats.json'
+	stats_survey_id = stats_survey_id or survey_id
 	write_normalization_stats(
 		SurveyNormalizationStats(
-			survey_id=survey_id,
-			source_path=root / f'{survey_id}.npy',
+			survey_id=stats_survey_id,
+			source_path=root / f'{stats_survey_id}.npy',
 			grid_order=('x', 'y', 'z'),
 			clip_low_percentile=0.5,
 			clip_high_percentile=99.5,
