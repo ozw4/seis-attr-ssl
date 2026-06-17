@@ -19,6 +19,15 @@ attributes:
     - glcm_contrast
     - glcm_homogeneity
 
+attribute_generation:
+  phase_reflect_pad_z: 64
+  phase_taper_fraction: 0.05
+  instantaneous_frequency_smooth_z: 5
+  instantaneous_frequency_envelope_quantile: 0.05
+  instantaneous_frequency_clip_percentile: 99.5
+  spectral_local_window_z: 65
+  spectral_remove_dc: true
+
 output:
   out_dir: /workspace/artifacts/ssl/visualizations/on_the_fly_attribute_compare
   stem: ENO0047389_0_00050_00400
@@ -38,9 +47,9 @@ visualization:
   # 大きくすると属性は安定しますが、メモリ消費が増えます。
   xz_y_window: 64
 
-  # 10属性だけを2x5で表示する設定。
-  show_raw_amplitude: 'true'
-  grid_mode: "3x4"
+  # 属性数とraw amplitude表示に合わせて自動でgridを選びます。
+  show_raw_amplitude: true
+  grid_mode: auto
 
   # raw amplitudeも含めたい場合は次に変更:
   # show_raw_amplitude: true

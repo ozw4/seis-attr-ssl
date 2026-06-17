@@ -12,13 +12,14 @@ matrix estimates.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from numbers import Integral, Real
 from operator import index
 
 import numpy as np
 
 from seis_attr_ssl.attributes.registry import MVP_ATTRIBUTE_REGISTRY
+from seis_attr_ssl.attributes.zero_mask import ZeroAmplitudeMaskConfig
 from seis_attr_ssl.data.normalization import (
 	SurveyNormalizationStats,
 	load_normalization_stats,
@@ -44,6 +45,7 @@ class AttributeGenerationConfig:
 	instantaneous_frequency_clip_percentile: float = 99.5
 	spectral_local_window_z: int = 65
 	spectral_remove_dc: bool = True
+	zero_mask: ZeroAmplitudeMaskConfig = field(default_factory=ZeroAmplitudeMaskConfig)
 
 	def validate(self) -> None:
 		"""Validate numeric generation settings."""
@@ -121,6 +123,7 @@ class AttributeGenerationConfig:
 		if not isinstance(self.spectral_remove_dc, bool):
 			msg = f'spectral_remove_dc must be a bool; got {self.spectral_remove_dc!r}'
 			raise TypeError(msg)
+		_validate_zero_mask_config(self.zero_mask)
 
 
 @dataclass(frozen=True)
@@ -148,7 +151,11 @@ def attribute_generation_config_from_mapping(
 		msg = f'unknown attribute_generation settings: {unknown_keys!r}'
 		raise ValueError(msg)
 
-	config = AttributeGenerationConfig(**dict(mapping))
+	values = dict(mapping)
+	if 'zero_mask' in values and isinstance(values['zero_mask'], Mapping):
+		values['zero_mask'] = ZeroAmplitudeMaskConfig(**dict(values['zero_mask']))
+
+	config = AttributeGenerationConfig(**values)
 	config.validate()
 	return config
 
@@ -358,6 +365,13 @@ def _validate_nonnegative_int(value: int, name: str) -> int:
 		msg = f'{name} must be a non-negative integer; got {value!r}'
 		raise ValueError(msg)
 	return integer
+
+
+def _validate_zero_mask_config(value: ZeroAmplitudeMaskConfig) -> None:
+	if not isinstance(value, ZeroAmplitudeMaskConfig):
+		msg = f'zero_mask must be a ZeroAmplitudeMaskConfig; got {value!r}'
+		raise TypeError(msg)
+	value.validate()
 
 
 def _safe_percentile(values: np.ndarray, percentile: float, default: float) -> float:
@@ -733,6 +747,7 @@ __all__ = [
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
 	'NormalizationStats',
+	'ZeroAmplitudeMaskConfig',
 	'attribute_generation_config_from_mapping',
 	'center_trim_attribute_result',
 	'generate_mvp_attribute',
