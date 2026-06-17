@@ -38,6 +38,8 @@ def test_mae_training_import_does_not_require_matplotlib(monkeypatch) -> None:
 			raise AssertionError(msg)
 		return real_import(name, *args, **kwargs)
 
+	monkeypatch.delattr(seis_attr_ssl, 'training', raising=False)
+	monkeypatch.delattr(seis_attr_ssl, 'visualization', raising=False)
 	for module_name in (
 		'seis_attr_ssl.training',
 		'seis_attr_ssl.training.mae',
@@ -45,7 +47,7 @@ def test_mae_training_import_does_not_require_matplotlib(monkeypatch) -> None:
 		'seis_attr_ssl.visualization.mae_debug',
 		'seis_attr_ssl.visualization.attribute_on_the_fly_compare',
 	):
-		sys.modules.pop(module_name, None)
+		monkeypatch.delitem(sys.modules, module_name, raising=False)
 
 	monkeypatch.setattr(builtins, '__import__', guarded_import)
 
