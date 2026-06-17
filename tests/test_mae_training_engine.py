@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -15,7 +16,28 @@ from seis_attr_ssl.data import (
 )
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
 from seis_attr_ssl.training import load_checkpoint
-from seis_attr_ssl.training.mae import run_mae_pretraining
+from seis_attr_ssl.training.collate import mae_collate_fn
+from seis_attr_ssl.training.mae import run_mae_pretraining, train_mae_one_epoch
+
+
+class _TinyMaeModel(torch.nn.Module):
+	def __init__(self) -> None:
+		super().__init__()
+		self.weight = torch.nn.Parameter(torch.tensor(1.0))
+
+	def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+		target = batch['target']
+		pred = self.weight * torch.zeros(
+			(
+				target.shape[0],
+				8,
+				target.shape[1],
+				8,
+			),
+			dtype=target.dtype,
+			device=target.device,
+		)
+		return {'pred_patches': pred}
 
 
 def _write_tiny_manifest(root: Path) -> Path:
@@ -202,3 +224,111 @@ def test_amp_flag_on_cpu_does_not_enable_cuda_amp(tmp_path: Path) -> None:
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 
 	assert checkpoint['metrics']['amp_enabled'] == 0.0
+
+
+def test_nonfinite_mae_loss_writes_diagnostic_json(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	def nan_loss(**_: object) -> dict[str, torch.Tensor]:
+		return {
+			'loss': torch.tensor(float('nan')),
+			'loss_reconstruction': torch.tensor(float('nan')),
+			'loss_dropped_attribute': torch.tensor(0.0),
+			'loss_gradient': torch.tensor(float('inf')),
+		}
+
+	monkeypatch.setattr('seis_attr_ssl.training.mae.mae_pretraining_loss', nan_loss)
+	sample = _mae_sample(
+		attribute_ids=(0, 2),
+		coords={
+			'survey_id': 'survey-a',
+			'local_start_xyz': (1, 2, 3),
+			'local_compute_start_xyz': (1, 2, 3),
+			'context_compute_start_xyz': None,
+		},
+	)
+	dataloader = torch.utils.data.DataLoader(
+		[sample],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyMaeModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	diagnostics_dir = tmp_path / 'diagnostics'
+
+	with pytest.raises(FloatingPointError, match='diagnostic written to'):
+		train_mae_one_epoch(
+			model=model,
+			dataloader=dataloader,
+			optimizer=optimizer,
+			device=torch.device('cpu'),
+			epoch=3,
+			patch_size_xyz=(2, 2, 2),
+			loss_config={'reconstruction': 'mse'},
+			global_step=1042,
+			diagnostics_dir=diagnostics_dir,
+		)
+
+	diagnostic_path = diagnostics_dir / 'nonfinite_mae_step_00001042.json'
+	text = diagnostic_path.read_text(encoding='utf-8')
+	assert 'NaN' not in text
+	assert 'Infinity' not in text
+
+	payload = json.loads(text)
+	assert payload['global_step'] == 1042
+	assert payload['epoch'] == 3
+	assert payload['batch_index'] == 0
+	assert payload['coords'] == [
+		{
+			'survey_id': 'survey-a',
+			'local_start_xyz': [1, 2, 3],
+			'local_compute_start_xyz': [1, 2, 3],
+			'context_compute_start_xyz': None,
+		},
+	]
+	assert payload['attribute_ids'] == [[0, 2]]
+	assert set(payload['losses']) >= {
+		'loss',
+		'loss_reconstruction',
+		'loss_dropped_attribute',
+		'loss_gradient',
+	}
+	assert payload['losses']['loss'] == {
+		'value': None,
+		'finite': False,
+		'repr': 'nan',
+	}
+	assert set(payload['tensors']) >= {
+		'x',
+		'target',
+		'context',
+		'pred_patches',
+		'target_valid',
+		'spatial_mask',
+		'dropped_attribute_mask',
+	}
+
+
+def _mae_sample(
+	*,
+	attribute_ids: tuple[int, ...],
+	coords: dict[str, object],
+) -> dict[str, object]:
+	channel_count = len(attribute_ids)
+	target_channel_count = len(MVP_ATTRIBUTE_REGISTRY.specs)
+	return {
+		'x': np.ones((channel_count, 4, 4, 4), dtype=np.float32),
+		'target': np.ones((target_channel_count, 4, 4, 4), dtype=np.float32),
+		'attribute_ids': np.asarray(attribute_ids, dtype=np.int64),
+		'spatial_mask': np.ones((2, 2, 2), dtype=np.bool_),
+		'visible_spatial_mask': np.zeros((2, 2, 2), dtype=np.bool_),
+		'attribute_input_mask': np.ones(target_channel_count, dtype=np.bool_),
+		'attribute_target_mask': np.ones(target_channel_count, dtype=np.bool_),
+		'dropped_attribute_mask': np.zeros(
+			target_channel_count,
+			dtype=np.bool_,
+		),
+		'target_valid': np.ones(target_channel_count, dtype=np.bool_),
+		'coords': coords,
+	}

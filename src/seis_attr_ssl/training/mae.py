@@ -18,6 +18,10 @@ from seis_attr_ssl.models.mae import StrictAttributeSetMAE3D
 from seis_attr_ssl.training.checkpoint import save_checkpoint
 from seis_attr_ssl.training.collate import move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
+from seis_attr_ssl.training.diagnostics import (
+	build_mae_nonfinite_diagnostic,
+	write_json_diagnostic,
+)
 from seis_attr_ssl.training.logging import print_epoch_metrics
 
 _MANIFEST_BUILD_HINT = (
@@ -50,13 +54,14 @@ def train_mae_one_epoch(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None = None,
 	global_step: int = 0,
 	max_steps: int | None = None,
+	diagnostics_dir: Path | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
 	totals: dict[str, float] = {}
 	batches = 0
 
-	for raw_batch in dataloader:
+	for batch_index, raw_batch in enumerate(dataloader):
 		if max_steps is not None and batches >= max_steps:
 			break
 		batch = move_batch_to_device(raw_batch, device)
@@ -91,7 +96,25 @@ def train_mae_one_epoch(  # noqa: PLR0913
 			loss = losses['loss']
 
 		if not torch.isfinite(loss).all():
-			msg = f'non-finite MAE loss at epoch {epoch}, step {global_step}'
+			if diagnostics_dir is not None:
+				diagnostic_path = write_json_diagnostic(
+					build_mae_nonfinite_diagnostic(
+						global_step=global_step,
+						epoch=epoch,
+						batch_index=batch_index,
+						batch=batch,
+						output=output,
+						losses=losses,
+						torch_amp_enabled=amp_enabled,
+					),
+					diagnostics_dir / f'nonfinite_mae_step_{global_step:08d}.json',
+				)
+				msg = (
+					f'non-finite MAE loss at epoch {epoch}, step {global_step}; '
+					f'diagnostic written to {diagnostic_path}'
+				)
+			else:
+				msg = f'non-finite MAE loss at epoch {epoch}, step {global_step}'
 			raise FloatingPointError(msg)
 
 		if amp_enabled:
@@ -162,6 +185,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
 
 	output_root = Path(_str_config(paths_config, 'output_root'))
+	diagnostics_dir = _resolve_diagnostics_dir(train_config, output_root)
 	epochs = _int_config(train_config, 'epochs', 1)
 	max_steps = _optional_int_config(train_config, 'max_steps')
 	state: MaeTrainingState | None = None
@@ -188,6 +212,7 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			scaler=scaler,
 			global_step=0 if state is None else state.global_step,
 			max_steps=remaining_steps,
+			diagnostics_dir=diagnostics_dir,
 		)
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_path = save_checkpoint(
@@ -273,6 +298,22 @@ def _resolve_device(train_config: Mapping[str, object]) -> torch.device:
 		msg = 'train.device requested CUDA, but CUDA is not available'
 		raise ValueError(msg)
 	return device
+
+
+def _resolve_diagnostics_dir(
+	train_config: Mapping[str, object],
+	output_root: Path,
+) -> Path:
+	value = train_config.get('diagnostics_dir')
+	if value is None:
+		return output_root / 'diagnostics'
+	if not isinstance(value, str):
+		msg = f'train.diagnostics_dir must be a string; got {value!r}'
+		raise TypeError(msg)
+	path = Path(value)
+	if path.is_absolute():
+		return path
+	return output_root / path
 
 
 def _validate_no_f3_pretraining_config(value: object, path: str = 'config') -> None:

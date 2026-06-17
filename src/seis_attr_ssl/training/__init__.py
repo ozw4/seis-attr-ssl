@@ -3,6 +3,12 @@
 from seis_attr_ssl.training.checkpoint import load_checkpoint, save_checkpoint
 from seis_attr_ssl.training.collate import mae_collate_fn, move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
+from seis_attr_ssl.training.diagnostics import (
+	build_mae_nonfinite_diagnostic,
+	summarize_loss_components,
+	summarize_tensor,
+	write_json_diagnostic,
+)
 from seis_attr_ssl.training.mae import (
 	MaeTrainingState,
 	run_mae_pretraining,
@@ -12,10 +18,14 @@ from seis_attr_ssl.training.mae import (
 __all__ = [
 	'MaeTrainingState',
 	'build_mae_dataloader',
+	'build_mae_nonfinite_diagnostic',
 	'load_checkpoint',
 	'mae_collate_fn',
 	'move_batch_to_device',
 	'run_mae_pretraining',
 	'save_checkpoint',
+	'summarize_loss_components',
+	'summarize_tensor',
 	'train_mae_one_epoch',
+	'write_json_diagnostic',
 ]
