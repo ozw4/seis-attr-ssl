@@ -1,0 +1,147 @@
+project:
+  name: SeisAttrSSL
+  package: seis_attr_ssl
+
+paths:
+  nopims_root: /home/dcuser/data/NOPIMS/
+  output_root: runs/mae_nopims_debug_visualization
+
+manifests:
+  train: /home/dcuser/data/NOPIMS/manifests/nopims_base_seismic_manifests.json
+
+data:
+  grid_order: [x, y, z]
+  volume_format: npy_memmap
+  base_seismic_kind: dip_steered_median_filtered
+  attribute_mode: on_the_fly
+  local_crop_size: [128, 128, 128]
+  local_attribute_halo: [16, 16, 64]
+  use_context: true
+  context_crop_size: [256, 256, 512]
+  context_downsample: [2, 2, 4]
+  context_attribute_halo: [8, 8, 16]
+  require_full_halo_inside_volume: true
+
+attributes:
+  names:
+    - amplitude_norm
+    - phase_sin
+    - phase_cos
+    - instantaneous_frequency
+    - spectral_low_ratio
+    - spectral_mid_ratio
+    - spectral_high_ratio
+    - coherence
+    - glcm_contrast
+    - glcm_homogeneity
+  groups:
+    amplitude_norm: waveform
+    phase_sin: phase
+    phase_cos: phase
+    instantaneous_frequency: frequency
+    spectral_low_ratio: spectral
+    spectral_mid_ratio: spectral
+    spectral_high_ratio: spectral
+    coherence: discontinuity
+    glcm_contrast: texture
+    glcm_homogeneity: texture
+
+normalization:
+  pre_attribute:
+    clipping_percentiles: [0.5, 99.5]
+    center: median
+    scale: iqr
+    epsilon: 1.0e-6
+    smooth_time_depth_trend_correction: false
+    trace_wise_agc: false
+    patch_wise_zscore: false
+
+stage: pretrain_mae
+
+attribute_generation:
+  phase_reflect_pad_z: 64
+  phase_taper_fraction: 0.05
+  instantaneous_frequency_smooth_z: 5
+  instantaneous_frequency_envelope_quantile: 0.05
+  instantaneous_frequency_clip_percentile: 99.5
+  spectral_local_window_z: 65
+  spectral_remove_dc: true
+  zero_mask:
+    enabled: true
+    zero_atol: 0.0
+    z_sample_influence_radius: 64
+    xy_trace_influence_radius: 1
+    z_trace_influence_radius: 0
+
+masking:
+  spatial_mask_ratio: 0.75
+  spatial_mask_mode: block
+  block_size_tokens: [2, 2, 2]
+  min_input_attributes: 4
+  max_input_attributes: 10
+  attribute_dropout_prob: 0.30
+  group_dropout_prob: 0.20
+
+visualization:
+  mae_debug:
+    enabled: true
+    output_dir: null
+    every_n_steps: 100
+    every_n_epochs: null
+    max_batches_per_trigger: 1
+    max_samples_per_batch: 1
+    attributes:
+      - amplitude_norm
+      - phase_sin
+      - instantaneous_frequency
+      - spectral_mid_ratio
+      - coherence
+      - glcm_contrast
+    columns:
+      - input
+      - masked_input
+      - target
+      - prediction
+      - abs_error
+    xy_slice_index: null
+    xz_slice_y_index: null
+    grid_mode: auto
+    dpi: 160
+    panel_width: 3.2
+    panel_height: 2.8
+    clip_percentiles: [1.0, 99.0]
+    use_known_ranges: true
+    mask_invalid_values: true
+    show_valid_mask_panel: true
+    show_spatial_mask_panel: true
+
+model:
+  name: strict_attribute_set_mae3d
+  patch_size: [8, 8, 8]
+  encoder_dim: 384
+  encoder_depth: 8
+  encoder_heads: 6
+  decoder_dim: 256
+  decoder_depth: 4
+  decoder_heads: 4
+  num_context_tokens: 8
+  context_token_min_valid_fraction: 0.5
+
+loss:
+  reconstruction: huber
+  huber_delta: 1.0
+  dropped_attribute_weight: 0.25
+  gradient_weight: 0.05
+  family_balanced: true
+
+train:
+  batch_size: 4
+  samples_per_epoch: 4000
+  num_workers: 8
+  shuffle: true
+  epochs: 1
+  lr: 3.0e-5
+  weight_decay: 0.05
+  amp: false
+  device: auto
+  seed: 42
