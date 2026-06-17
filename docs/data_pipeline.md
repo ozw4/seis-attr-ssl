@@ -117,6 +117,11 @@ attribute_names:
 External structural model outputs are not part of the MVP pretraining input.
 The masked inpainting baseline is not part of the MVP.
 
+Phase channels are generated from a reflect-padded z-axis Hilbert transform,
+instantaneous frequency is a stabilized z-phase-gradient channel, and spectral
+ratio channels are local z-window energy ratios rather than trace-global
+summaries. The GLCM channels remain deterministic proxy texture attributes.
+
 ## Manifest Creation
 
 Build a NOPIMS manifest JSON with:

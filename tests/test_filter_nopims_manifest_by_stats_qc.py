@@ -278,7 +278,7 @@ def _write_volume(root: Path, survey_id: str) -> Path:
 	return path
 
 
-def _write_stats(
+def _write_stats(  # noqa: PLR0913
 	root: Path,
 	survey_id: str,
 	*,

@@ -1,0 +1,45 @@
+input:
+  amplitude_npy: /home/dcuser/data/NOPIMS/example_amplitude.npy
+  normalization_stats_json: /home/dcuser/data/NOPIMS/normalization_stats.json
+  assume_normalized: false
+
+output:
+  out_dir: runs/attribute_on_the_fly_compare
+  stem: attribute_compare
+
+attributes:
+  names:
+    - amplitude_norm
+    - phase_sin
+    - phase_cos
+    - instantaneous_frequency
+    - spectral_low_ratio
+    - spectral_mid_ratio
+    - spectral_high_ratio
+    - coherence
+    - glcm_contrast
+    - glcm_homogeneity
+
+visualization:
+  xy_slice_index:
+  xz_slice_y_index:
+  xy_z_window: 256
+  xz_y_window: 64
+  clip_percentiles: [1.0, 99.0]
+  show_raw_amplitude: true
+  use_known_ranges: true
+  dpi: 200
+  figure_height: 4.0
+  panel_width: 4.0
+  xy_aspect: equal
+  xz_aspect: auto
+  grid_mode: auto
+
+attribute_generation:
+  phase_reflect_pad_z: 64
+  phase_taper_fraction: 0.05
+  instantaneous_frequency_smooth_z: 5
+  instantaneous_frequency_envelope_quantile: 0.05
+  instantaneous_frequency_clip_percentile: 99.5
+  spectral_local_window_z: 65
+  spectral_remove_dc: true

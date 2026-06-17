@@ -8,6 +8,7 @@ from collections.abc import Mapping, Sequence
 from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
 
+from seis_attr_ssl.attributes.on_the_fly import attribute_generation_config_from_mapping
 from seis_attr_ssl.config.schema import (
 	BASE_SEISMIC_REQUIRED_STAGES,
 	DISALLOWED_PRETRAINING_KEYS,
@@ -85,6 +86,7 @@ def validate_config(config: _T) -> _T:
 
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
+	_validate_optional_attribute_generation(config, stage)
 
 	return config
 
@@ -95,6 +97,17 @@ def _validate_stage(config: Mapping[str, object]) -> str:
 		msg = f'stage must be one of {sorted(KNOWN_STAGES)!r}; got {stage!r}'
 		raise ValueError(msg)
 	return str(stage)
+
+
+def _validate_optional_attribute_generation(
+	config: Mapping[str, object],
+	stage: str,
+) -> None:
+	if stage != 'pretrain_mae' or 'attribute_generation' not in config:
+		return
+	attribute_generation_config_from_mapping(
+		_required_mapping(config, 'attribute_generation'),
+	)
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:

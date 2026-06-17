@@ -39,6 +39,8 @@ def test_loads_valid_mvp_config() -> None:
 	assert cfg['data']['local_attribute_halo'] == [16, 16, 64]
 	assert cfg['data']['context_attribute_halo'] == [8, 8, 16]
 	assert cfg['data']['require_full_halo_inside_volume'] is True
+	assert cfg['attribute_generation']['spectral_local_window_z'] == 65
+	assert cfg['attribute_generation']['spectral_remove_dc'] is True
 	assert len(cfg['attributes']['names']) == 10
 	assert cfg['train']['samples_per_epoch'] == 10000
 	assert cfg['train']['num_workers'] == 4
@@ -80,6 +82,36 @@ def test_phase75_stable_config_loads_and_keeps_pilot_steps_cli_controlled() -> N
 	assert cfg['train']['checkpoint_every_steps'] == 1000
 	assert cfg['train']['diagnostics_dir'] == 'diagnostics'
 	assert 'max_steps' not in cfg['train']
+
+
+def test_attribute_generation_config_is_optional_for_mae_validation() -> None:
+	cfg = _valid_config()
+	del cfg['attribute_generation']
+
+	validate_config(cfg)
+
+
+def test_valid_attribute_generation_config_is_allowed() -> None:
+	cfg = _valid_config()
+	cfg['attribute_generation'] = {
+		'phase_reflect_pad_z': 32,
+		'phase_taper_fraction': 0.10,
+		'instantaneous_frequency_smooth_z': 3,
+		'instantaneous_frequency_envelope_quantile': 0.10,
+		'instantaneous_frequency_clip_percentile': 95.0,
+		'spectral_local_window_z': 9,
+		'spectral_remove_dc': False,
+	}
+
+	validate_config(cfg)
+
+
+def test_invalid_attribute_generation_config_is_rejected() -> None:
+	cfg = _valid_config()
+	cfg['attribute_generation']['spectral_local_window_z'] = 4
+
+	with pytest.raises(ValueError, match='spectral_local_window_z'):
+		validate_config(cfg)
 
 
 def test_load_config_applies_nopims_root_default(tmp_path: Path) -> None:
