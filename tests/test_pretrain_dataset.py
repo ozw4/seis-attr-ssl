@@ -359,7 +359,7 @@ def test_pretrain_dataset_context_valid_mask_downsamples_raw_zero_trace_region(
 		context_downsample=1,
 	)
 
-	context, context_valid_mask = dataset._read_context(
+	context, context_valid_mask = dataset._read_context(  # noqa: SLF001
 		manifest,
 		local_request,
 		(MVP_ATTRIBUTE_REGISTRY.name_to_id('amplitude_norm'),),

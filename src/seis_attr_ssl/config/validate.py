@@ -9,6 +9,7 @@ from numbers import Integral, Real
 from typing import TypeAlias, TypeVar
 
 from seis_attr_ssl.attributes.on_the_fly import attribute_generation_config_from_mapping
+from seis_attr_ssl.attributes.registry import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.config.schema import (
 	BASE_SEISMIC_REQUIRED_STAGES,
 	DISALLOWED_PRETRAINING_KEYS,
@@ -87,6 +88,7 @@ def validate_config(config: _T) -> _T:
 	if stage in {'pretrain_mae', 'dense_adaptation'} and 'masking' in config:
 		_validate_masking(_required_mapping(config, 'masking'))
 	_validate_optional_attribute_generation(config, stage)
+	_validate_optional_mae_debug_visualization(config)
 
 	return config
 
@@ -108,6 +110,133 @@ def _validate_optional_attribute_generation(
 	attribute_generation_config_from_mapping(
 		_required_mapping(config, 'attribute_generation'),
 	)
+
+
+def _validate_optional_mae_debug_visualization(config: Mapping[str, object]) -> None:
+	if 'visualization' not in config:
+		return
+	visualization = _required_mapping(config, 'visualization')
+	if 'mae_debug' not in visualization:
+		return
+	mae_debug = _required_mapping(visualization, 'mae_debug')
+	prefix = 'visualization.mae_debug'
+
+	_validate_mae_debug_core(mae_debug, prefix=prefix)
+	_validate_mae_debug_layout(mae_debug, prefix=prefix)
+	_validate_mae_debug_display_flags(mae_debug, prefix=prefix)
+
+
+def _validate_mae_debug_core(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	if 'enabled' in mae_debug:
+		_validate_bool(mae_debug, 'enabled', prefix=prefix)
+	if 'output_dir' in mae_debug:
+		_validate_optional_string(mae_debug, 'output_dir', prefix=prefix)
+	_validate_mae_debug_timing(mae_debug, prefix=prefix)
+	_validate_mae_debug_selection(mae_debug, prefix=prefix)
+
+
+def _validate_mae_debug_timing(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	for key in ('every_n_steps', 'every_n_epochs'):
+		if key in mae_debug:
+			_validate_optional_positive_int(mae_debug, key, prefix=prefix)
+	for key in ('max_batches_per_trigger', 'max_samples_per_batch'):
+		if key in mae_debug:
+			_validate_positive_int(mae_debug, key, prefix=prefix)
+
+
+def _validate_mae_debug_selection(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	for key in ('xy_slice_index', 'xz_slice_y_index'):
+		if key in mae_debug:
+			_validate_optional_int(mae_debug, key, prefix=prefix)
+	if 'attributes' in mae_debug:
+		_validate_mae_debug_attributes(mae_debug, prefix=prefix)
+	if 'columns' in mae_debug:
+		_validate_mae_debug_columns(mae_debug, prefix=prefix)
+
+
+def _validate_mae_debug_layout(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	if 'grid_mode' in mae_debug:
+		_validate_grid_mode(mae_debug, 'grid_mode', prefix=prefix)
+	if 'dpi' in mae_debug:
+		_validate_positive_int(mae_debug, 'dpi', prefix=prefix)
+	for key in ('panel_width', 'panel_height'):
+		if key in mae_debug:
+			_validate_optional_positive_float(mae_debug, key, prefix=prefix)
+	if 'clip_percentiles' in mae_debug:
+		_validate_clip_percentiles(mae_debug, prefix=prefix)
+
+
+def _validate_mae_debug_display_flags(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	for key in (
+		'use_known_ranges',
+		'mask_invalid_values',
+		'show_valid_mask_panel',
+		'show_spatial_mask_panel',
+	):
+		if key in mae_debug:
+			_validate_bool(mae_debug, key, prefix=prefix)
+
+
+def _validate_mae_debug_attributes(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> tuple[str, ...]:
+	value = mae_debug.get('attributes')
+	if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+		msg = f'{prefix}.attributes must be a list of attribute names'
+		raise ValueError(msg)
+	names = tuple(value)
+	unknown = sorted(set(names) - set(MVP_ATTRIBUTE_REGISTRY.names))
+	if unknown:
+		msg = (
+			f'{prefix}.attributes contains unknown attribute names: {unknown!r}'
+		)
+		raise ValueError(msg)
+	return names
+
+
+def _validate_mae_debug_columns(
+	mae_debug: Mapping[str, object],
+	*,
+	prefix: str,
+) -> tuple[str, ...]:
+	allowed = ('input', 'masked_input', 'target', 'prediction', 'abs_error')
+	value = mae_debug.get('columns')
+	if not isinstance(value, list) or not all(
+		isinstance(column, str) for column in value
+	):
+		msg = f'{prefix}.columns must be a list of column names'
+		raise ValueError(msg)
+	columns = tuple(value)
+	invalid = sorted(set(columns) - set(allowed))
+	if invalid:
+		msg = (
+			f'{prefix}.columns contains invalid columns: {invalid!r}; '
+			f'allowed columns are {allowed!r}'
+		)
+		raise ValueError(msg)
+	return columns
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -449,6 +578,51 @@ def _validate_optional_positive_float(
 	return number
 
 
+def _validate_optional_string(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> str | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str):
+		msg = f'{prefix}.{key} must be a string or null; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_optional_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> int | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{prefix}.{key} must be an integer or null; got {value!r}'
+		raise TypeError(msg)
+	return int(value)
+
+
+def _validate_optional_positive_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> int | None:
+	value = _validate_optional_int(parent, key, prefix=prefix)
+	if value is None:
+		return None
+	if value <= 0:
+		msg = f'{prefix}.{key} must be positive or null; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
 def _validate_positive_int(
 	parent: Mapping[str, object],
 	key: str,
@@ -541,6 +715,56 @@ def _require_xyz_list(
 		msg = f'{prefix}.{key} must be a length-3 integer list; got {value!r}'
 		raise TypeError(msg)
 	return [int(item) for item in value]
+
+
+def _validate_clip_percentiles(
+	parent: Mapping[str, object],
+	*,
+	prefix: str,
+) -> tuple[float, float]:
+	value = parent.get('clip_percentiles')
+	if (
+		not isinstance(value, list)
+		or len(value) != 2
+		or any(isinstance(item, bool) or not isinstance(item, Real) for item in value)
+	):
+		msg = (
+			f'{prefix}.clip_percentiles must be two numeric values; '
+			f'got {value!r}'
+		)
+		raise TypeError(msg)
+	low, high = (float(value[0]), float(value[1]))
+	if (
+		not math.isfinite(low)
+		or not math.isfinite(high)
+		or not 0.0 <= low < high <= 100.0
+	):
+		msg = (
+			f'{prefix}.clip_percentiles must be increasing values in [0, 100]; '
+			f'got {[low, high]!r}'
+		)
+		raise ValueError(msg)
+	return low, high
+
+
+def _validate_grid_mode(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> str:
+	value = parent.get(key)
+	if not isinstance(value, str):
+		msg = f'{prefix}.{key} must be a string; got {value!r}'
+		raise TypeError(msg)
+	mode = value.strip().lower()
+	if mode == 'auto':
+		return value
+	match = re.fullmatch(r'([1-9]\d*)x([1-9]\d*)', mode)
+	if match is None:
+		msg = f"{prefix}.{key} must be 'auto' or '<rows>x<cols>'; got {value!r}"
+		raise ValueError(msg)
+	return value
 
 
 def _reject_f3_pretraining_config(value: object, path: str = 'config') -> None:
