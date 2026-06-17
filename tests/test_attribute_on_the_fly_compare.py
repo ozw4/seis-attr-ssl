@@ -27,16 +27,21 @@ def test_visualization_passes_attribute_generation_config_to_on_the_fly_generato
 	np.save(volume_path, np.arange(4 * 5 * 6, dtype=np.float32).reshape(4, 5, 6))
 	attribute_generation_config = AttributeGenerationConfig(spectral_local_window_z=9)
 	calls: list[AttributeGenerationConfig | None] = []
+	zero_mask_shapes: list[tuple[int, int, int] | None] = []
 
 	def fake_generate_mvp_attributes_for_payload(
 		amp_norm_compute: np.ndarray,
 		payload_slices_xyz: tuple[slice, slice, slice],
 		*,
 		valid_mask=None,
+		zero_mask_amplitude: np.ndarray | None = None,
 		config: AttributeGenerationConfig | None = None,
 	) -> AttributeGenerationResult:
 		del valid_mask
 		calls.append(config)
+		zero_mask_shapes.append(
+			None if zero_mask_amplitude is None else zero_mask_amplitude.shape,
+		)
 		payload_shape = tuple(
 			len(range(*payload_slice.indices(size)))
 			for payload_slice, size in zip(
@@ -73,6 +78,7 @@ def test_visualization_passes_attribute_generation_config_to_on_the_fly_generato
 	)
 
 	assert calls == [attribute_generation_config, attribute_generation_config]
+	assert zero_mask_shapes == [(4, 5, 5), (4, 3, 6)]
 	assert xy_png.exists()
 	assert xz_png.exists()
 
@@ -127,9 +133,12 @@ def test_visualization_valid_mask_panel_uses_displayed_local_slice(
 		payload_slices_xyz: tuple[slice, slice, slice],
 		*,
 		valid_mask=None,
+		zero_mask_amplitude: np.ndarray | None = None,
 		config: AttributeGenerationConfig | None = None,
 	) -> AttributeGenerationResult:
 		del valid_mask, config
+		assert zero_mask_amplitude is not None
+		assert zero_mask_amplitude.shape == amp_norm_compute.shape
 		assert payload_slices_xyz == tuple(
 			slice(0, size) for size in amp_norm_compute.shape
 		)
