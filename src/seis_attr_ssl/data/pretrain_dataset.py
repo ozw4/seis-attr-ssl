@@ -15,6 +15,7 @@ from seis_attr_ssl.attributes.on_the_fly import (
 	generate_mvp_attributes_for_payload,
 	normalize_base_seismic,
 )
+from seis_attr_ssl.attributes.zero_mask import compute_zero_amplitude_invalid_mask
 from seis_attr_ssl.data.attribute_subset import (
 	AMPLITUDE_ATTRIBUTE_ID,
 )
@@ -438,6 +439,7 @@ class NopimsAttributePretrainDataset:
 				normalize_base_seismic(base_crop, stats),
 				payload_slices,
 				valid_mask=compute_valid_mask,
+				zero_mask_amplitude=base_crop,
 				config=self.attribute_generation_config,
 			)
 			return result.attributes, result.attribute_valid, result.voxel_valid_mask
@@ -484,10 +486,29 @@ class NopimsAttributePretrainDataset:
 				valid_mask,
 				self.context_downsample_xyz,
 			)
+			source_zero_invalid_mask = compute_zero_amplitude_invalid_mask(
+				base_crop,
+				valid_mask=valid_mask,
+				config=self.attribute_generation_config.zero_mask,
+			)
+			context_zero_invalid_mask = _downsample_mask_any(
+				source_zero_invalid_mask,
+				self.context_downsample_xyz,
+			)
+			context_valid_mask = np.logical_and(
+				context_valid_mask,
+				np.logical_not(context_zero_invalid_mask),
+			)
+			raw_context, _ = downsample_context_masked_mean(
+				base_crop,
+				valid_mask,
+				self.context_downsample_xyz,
+			)
 			context_result = generate_mvp_attributes_for_payload(
 				normalized_context,
 				lowres_payload_slices,
 				valid_mask=context_valid_mask,
+				zero_mask_amplitude=raw_context,
 				config=self.attribute_generation_config,
 			)
 			ids = np.asarray(input_ids, dtype=np.int64)
@@ -737,6 +758,33 @@ def _validate_downsample(value: int | Sequence[int], name: str) -> ContextDownsa
 
 def _downsample_xyz(value: ContextDownsample) -> XYZ:
 	return normalize_downsample_xyz(value)
+
+
+def _downsample_mask_any(mask: np.ndarray, factor: int | Sequence[int]) -> np.ndarray:
+	factor_xyz = normalize_downsample_xyz(factor)
+	if mask.ndim != 3:
+		msg = f'mask must be a 3D [x, y, z] array; got ndim={mask.ndim}'
+		raise ValueError(msg)
+	if any(
+		axis % factor_axis != 0
+		for axis, factor_axis in zip(mask.shape, factor_xyz, strict=True)
+	):
+		msg = (
+			'mask shape must be divisible by factor in all dimensions; '
+			f'got shape={mask.shape!r}, factor={factor!r}'
+		)
+		raise ValueError(msg)
+	x_size, y_size, z_size = mask.shape
+	x_factor, y_factor, z_factor = factor_xyz
+	blocked = np.asarray(mask, dtype=bool).reshape(
+		x_size // x_factor,
+		x_factor,
+		y_size // y_factor,
+		y_factor,
+		z_size // z_factor,
+		z_factor,
+	)
+	return blocked.any(axis=(1, 3, 5))
 
 
 def _validate_nonnegative_int(value: int, name: str) -> int:

@@ -167,14 +167,19 @@ def generate_mvp_attributes(
 	amp_norm: np.ndarray,
 	*,
 	valid_mask: np.ndarray | None = None,
+	zero_mask_amplitude: np.ndarray | None = None,
 	config: AttributeGenerationConfig | None = None,
 ) -> AttributeGenerationResult:
 	"""Generate all MVP attributes from one normalized [x, y, z] amplitude crop."""
 	cfg = config or AttributeGenerationConfig()
 	cfg.validate()
 	amplitude, base_valid_mask = _prepare_amplitude(amp_norm, valid_mask)
+	zero_mask_source = _prepare_zero_mask_amplitude(
+		zero_mask_amplitude,
+		amplitude.shape,
+	)
 	zero_invalid_mask = compute_zero_amplitude_invalid_mask(
-		amplitude,
+		amplitude if zero_mask_source is None else zero_mask_source,
 		valid_mask=base_valid_mask,
 		config=cfg.zero_mask,
 	)
@@ -250,12 +255,14 @@ def generate_mvp_attributes_for_payload(
 	payload_slices_xyz: tuple[slice, slice, slice],
 	*,
 	valid_mask: np.ndarray | None = None,
+	zero_mask_amplitude: np.ndarray | None = None,
 	config: AttributeGenerationConfig | None = None,
 ) -> AttributeGenerationResult:
 	"""Generate MVP attributes on a compute crop and return only payload slices."""
 	result = generate_mvp_attributes(
 		amp_norm_compute,
 		valid_mask=valid_mask,
+		zero_mask_amplitude=zero_mask_amplitude,
 		config=config,
 	)
 	return center_trim_attribute_result(result, payload_slices_xyz)
@@ -549,6 +556,27 @@ def _prepare_amplitude(
 	).astype(np.float32, copy=False)
 	amplitude = np.where(voxel_valid_mask, amplitude, np.float32(0.0))
 	return amplitude.astype(np.float32, copy=False), voxel_valid_mask
+
+
+def _prepare_zero_mask_amplitude(
+	zero_mask_amplitude: np.ndarray | None,
+	amp_shape: tuple[int, int, int],
+) -> np.ndarray | None:
+	if zero_mask_amplitude is None:
+		return None
+	amplitude = np.asarray(zero_mask_amplitude, dtype=np.float32)
+	if amplitude.shape != amp_shape:
+		msg = (
+			'zero_mask_amplitude shape must match amp_norm shape; got '
+			f'{amplitude.shape!r} and {amp_shape!r}'
+		)
+		raise ValueError(msg)
+	return np.nan_to_num(
+		amplitude,
+		nan=0.0,
+		posinf=0.0,
+		neginf=0.0,
+	).astype(np.float32, copy=False)
 
 
 def _phase_attributes(

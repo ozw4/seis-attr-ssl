@@ -166,6 +166,7 @@ def _save_xy_png(  # noqa: PLR0913
 	result = generate_mvp_attributes_for_payload(
 		norm_crop,
 		payload_slices,
+		zero_mask_amplitude=raw_crop,
 		config=attribute_generation_config,
 	)
 
@@ -229,6 +230,7 @@ def _save_xz_png(  # noqa: PLR0913
 	result = generate_mvp_attributes_for_payload(
 		norm_crop,
 		payload_slices,
+		zero_mask_amplitude=raw_crop,
 		config=attribute_generation_config,
 	)
 

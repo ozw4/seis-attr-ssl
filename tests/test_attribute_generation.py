@@ -347,6 +347,29 @@ def test_generate_mvp_attributes_invalidates_zero_z_plane_influence() -> None:
 	assert not result.attributes[:, ~expected].any()
 
 
+def test_generate_mvp_attributes_uses_raw_zero_source_for_zero_z_plane() -> None:
+	amp_norm = np.ones((3, 4, 7), dtype=np.float32)
+	zero_mask_amplitude = np.ones_like(amp_norm)
+	zero_mask_amplitude[:, :, 3] = 0.0
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(
+			z_sample_influence_radius=1,
+			xy_trace_influence_radius=0,
+		),
+	)
+
+	result = generate_mvp_attributes(
+		amp_norm,
+		zero_mask_amplitude=zero_mask_amplitude,
+		config=config,
+	)
+
+	expected = np.ones_like(amp_norm, dtype=bool)
+	expected[:, :, 2:5] = False
+	np.testing.assert_array_equal(result.voxel_valid_mask, expected)
+	assert not result.attributes[:, ~expected].any()
+
+
 def test_generate_mvp_attributes_invalidates_zero_trace_influence() -> None:
 	amp = np.ones((5, 5, 4), dtype=np.float32)
 	amp[2, 2, :] = 0.0
@@ -363,6 +386,56 @@ def test_generate_mvp_attributes_invalidates_zero_trace_influence() -> None:
 	expected[1:4, 1:4, :] = False
 	np.testing.assert_array_equal(result.voxel_valid_mask, expected)
 	assert not result.attributes[:, ~expected].any()
+
+
+def test_generate_mvp_attributes_uses_raw_zero_source_for_zero_trace() -> None:
+	amp_norm = np.ones((5, 5, 4), dtype=np.float32)
+	zero_mask_amplitude = np.ones_like(amp_norm)
+	zero_mask_amplitude[2, 2, :] = 0.0
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=1,
+		),
+	)
+
+	result = generate_mvp_attributes(
+		amp_norm,
+		zero_mask_amplitude=zero_mask_amplitude,
+		config=config,
+	)
+
+	expected = np.ones_like(amp_norm, dtype=bool)
+	expected[1:4, 1:4, :] = False
+	np.testing.assert_array_equal(result.voxel_valid_mask, expected)
+	assert not result.attributes[:, ~expected].any()
+
+
+def test_generate_mvp_attributes_keeps_normalized_source_default_behavior() -> None:
+	amp_norm = np.ones((3, 4, 5), dtype=np.float32)
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=0,
+		),
+	)
+
+	result = generate_mvp_attributes(amp_norm, config=config)
+
+	np.testing.assert_array_equal(
+		result.voxel_valid_mask,
+		np.ones_like(amp_norm, dtype=bool),
+	)
+
+
+def test_generate_mvp_attributes_rejects_zero_mask_source_shape_mismatch() -> None:
+	amp_norm = np.ones((3, 4, 5), dtype=np.float32)
+
+	with pytest.raises(ValueError, match='zero_mask_amplitude shape'):
+		generate_mvp_attributes(
+			amp_norm,
+			zero_mask_amplitude=np.ones((3, 4, 4), dtype=np.float32),
+		)
 
 
 def test_generate_mvp_attributes_zero_mask_disabled_preserves_valid_mask() -> None:
@@ -390,11 +463,13 @@ def test_generate_mvp_attributes_for_payload_trims_compute_crop(monkeypatch) -> 
 		amp_norm: np.ndarray,
 		*,
 		valid_mask: np.ndarray | None = None,
+		zero_mask_amplitude: np.ndarray | None = None,
 		config: object | None = None,
 	) -> AttributeGenerationResult:
 		del config
 		assert amp_norm.shape == compute_shape
 		assert valid_mask is not None
+		assert zero_mask_amplitude is None
 		attributes = np.broadcast_to(
 			np.arange(10, dtype=np.float32).reshape(10, 1, 1, 1),
 			(10, *compute_shape),
@@ -485,15 +560,20 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	] = []
 	attribute_config = AttributeGenerationConfig(spectral_local_window_z=9)
 	received_configs: list[object | None] = []
+	received_zero_mask_shapes: list[tuple[int, int, int] | None] = []
 
 	def fake_generate_for_payload(
 		amp_norm: np.ndarray,
 		payload_slices_xyz: tuple[slice, slice, slice],
 		*,
 		valid_mask: np.ndarray | None = None,
+		zero_mask_amplitude: np.ndarray | None = None,
 		config: object | None = None,
 	) -> AttributeGenerationResult:
 		received_configs.append(config)
+		received_zero_mask_shapes.append(
+			None if zero_mask_amplitude is None else zero_mask_amplitude.shape,
+		)
 		if amp_norm.shape == (36, 36, 132):
 			target_calls.append((amp_norm.shape, payload_slices_xyz))
 			assert payload_slices_xyz == (
@@ -564,6 +644,7 @@ def test_pretrain_dataset_generates_context_attributes_after_downsampling(
 	]
 	assert sample['context'].shape == (2, 4, 4, 4)
 	assert received_configs == [attribute_config, attribute_config]
+	assert received_zero_mask_shapes == [(36, 36, 132), (20, 20, 36)]
 
 
 def test_pretrain_dataset_spatial_mask_does_not_change_generated_target(

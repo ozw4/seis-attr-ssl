@@ -85,6 +85,7 @@ def _manifest_metadata(
 def _write_base_manifest(
 	root: Path,
 	shape_xyz: tuple[int, int, int] = (10, 10, 10),
+	median: float = 0.0,
 ) -> SurveyManifest:
 	seismic_path = root / 'dip_steered_median_filtered.npy'
 	seismic_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,7 +104,7 @@ def _write_base_manifest(
 			'"clip_high_percentile": 99.5, '
 			'"clip_low": 0.0, '
 			'"clip_high": 999.0, '
-			'"median": 0.0, '
+			f'"median": {median}, '
 			'"iqr": 10.0, '
 			'"eps": 1.0e-6'
 			'}'
@@ -286,6 +287,89 @@ def test_pretrain_dataset_base_local_valid_mask_includes_zero_trace_region(
 	expected[0:3, 0:3, :] = False
 	np.testing.assert_array_equal(sample['local_valid_mask'], expected)
 	assert not sample['target'][:, ~expected].any()
+
+
+def test_pretrain_dataset_base_local_valid_mask_uses_raw_zero_trace_region(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(
+		tmp_path / 'survey-a',
+		shape_xyz=LOCAL_SIZE,
+		median=5.0,
+	)
+	base_path = manifest.root / manifest.base_seismic.path
+	base = np.ones(LOCAL_SIZE, dtype=np.float32)
+	base[1, 1, :] = 0.0
+	np.save(base_path, base)
+	dataset = _dataset(
+		manifest,
+		use_context=False,
+		local_attribute_halo_xyz=(0, 0, 0),
+		attribute_generation_config=AttributeGenerationConfig(
+			zero_mask=ZeroAmplitudeMaskConfig(
+				z_sample_influence_radius=0,
+				xy_trace_influence_radius=1,
+			),
+		),
+	)
+
+	sample = dataset[0]
+
+	expected = np.ones(LOCAL_SIZE, dtype=bool)
+	expected[0:3, 0:3, :] = False
+	np.testing.assert_array_equal(sample['local_valid_mask'], expected)
+	assert not sample['target'][:, ~expected].any()
+
+
+def test_pretrain_dataset_context_valid_mask_downsamples_raw_zero_trace_region(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(
+		tmp_path / 'survey-a',
+		shape_xyz=(4, 4, 4),
+		median=5.0,
+	)
+	base_path = manifest.root / manifest.base_seismic.path
+	base = np.ones((4, 4, 4), dtype=np.float32)
+	base[0, 0, :] = 0.0
+	np.save(base_path, base)
+	dataset = _dataset(
+		manifest,
+		local_crop_size_xyz=(2, 2, 2),
+		context_crop_size_xyz=(4, 4, 4),
+		context_downsample=2,
+		context_attribute_halo_xyz=(0, 0, 0),
+		local_attribute_halo_xyz=(0, 0, 0),
+		patch_size_xyz=(2, 2, 2),
+		attribute_generation_config=AttributeGenerationConfig(
+			phase_reflect_pad_z=0,
+			instantaneous_frequency_smooth_z=3,
+			spectral_local_window_z=3,
+			zero_mask=ZeroAmplitudeMaskConfig(
+				z_sample_influence_radius=0,
+				xy_trace_influence_radius=0,
+			),
+		),
+	)
+	local_request = CropRequest(
+		survey_id='survey-a',
+		start_xyz=(1, 1, 1),
+		size_xyz=(2, 2, 2),
+		context_size_xyz=None,
+		context_downsample=1,
+	)
+
+	context, context_valid_mask = dataset._read_context(
+		manifest,
+		local_request,
+		(MVP_ATTRIBUTE_REGISTRY.name_to_id('amplitude_norm'),),
+	)
+
+	expected = np.ones((2, 2, 2), dtype=bool)
+	expected[0, 0, :] = False
+	assert context is not None
+	np.testing.assert_array_equal(context_valid_mask, expected)
+	assert not context[:, ~expected].any()
 
 
 def test_pretrain_dataset_reads_base_target_with_local_halo(
