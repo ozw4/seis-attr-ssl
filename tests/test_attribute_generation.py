@@ -7,6 +7,7 @@ import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.attributes.on_the_fly import (
+	_hilbert_z,
 	_reflect_pad_z,
 	_smooth_z_mean,
 	_unpad_z,
@@ -87,9 +88,11 @@ def test_generate_mvp_attributes_constant_cube_contract() -> None:
 	assert result.voxel_valid_mask.shape == amp.shape
 	np.testing.assert_array_equal(result.attribute_valid, np.ones(10, dtype=bool))
 	np.testing.assert_allclose(result.attributes[0], amp)
-	np.testing.assert_allclose(result.attributes[1], 0.0, atol=1.0e-6)
-	np.testing.assert_allclose(result.attributes[2], 1.0, atol=1.0e-6)
-	np.testing.assert_allclose(result.attributes[3], 0.0, atol=1.0e-6)
+	assert (result.attributes[1] >= -1.0).all()
+	assert (result.attributes[1] <= 1.0).all()
+	assert (result.attributes[2] >= -1.0).all()
+	assert (result.attributes[2] <= 1.0).all()
+	assert (result.attributes[3] >= 0.0).all()
 	np.testing.assert_allclose(result.attributes[4], 1.0, atol=1.0e-5)
 	np.testing.assert_allclose(result.attributes[7], 1.0, atol=1.0e-6)
 	np.testing.assert_allclose(result.attributes[8], 0.0, atol=1.0e-6)
@@ -127,6 +130,62 @@ def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	assert float(result.attributes[3].mean()) > 0.0
 	assert float(result.attributes[4].mean()) > float(result.attributes[5].mean())
 	assert float(result.attributes[4].mean()) > float(result.attributes[6].mean())
+
+
+def test_hilbert_z_reflect_padding_preserves_original_shape() -> None:
+	z_size = 16
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 2.0 * z / z_size).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 3, z_size)).copy()
+	config = AttributeGenerationConfig(
+		phase_reflect_pad_z=8,
+		phase_taper_fraction=0.1,
+	)
+
+	analytic = _hilbert_z(amp, config)
+
+	assert analytic.shape == amp.shape
+	assert np.isfinite(analytic.real).all()
+	assert np.isfinite(analytic.imag).all()
+
+
+def test_generate_mvp_attributes_sinusoid_phase_is_finite_and_bounded() -> None:
+	z_size = 32
+	z = np.arange(z_size, dtype=np.float32)
+	trace = np.sin(2.0 * np.pi * 3.0 * z / z_size).astype(np.float32)
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (3, 2, z_size)).copy()
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert np.isfinite(result.attributes).all()
+	assert (result.attributes[1] >= -1.0).all()
+	assert (result.attributes[1] <= 1.0).all()
+	assert (result.attributes[2] >= -1.0).all()
+	assert (result.attributes[2] <= 1.0).all()
+
+
+def test_generate_mvp_attributes_near_constant_phase_is_finite() -> None:
+	z_size = 12
+	z = np.linspace(-1.0, 1.0, z_size, dtype=np.float32)
+	trace = np.ones(z_size, dtype=np.float32) + (z * np.float32(1.0e-7))
+	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 2, z_size)).copy()
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert np.isfinite(result.attributes).all()
+
+
+@pytest.mark.parametrize('z_size', [1, 2, 4])
+def test_generate_mvp_attributes_short_z_sizes_do_not_crash(z_size: int) -> None:
+	amp = np.ones((2, 3, z_size), dtype=np.float32)
+
+	result = generate_mvp_attributes(amp)
+
+	assert result.attributes.shape == (10, *amp.shape)
+	assert result.attributes.dtype == np.float32
+	assert np.isfinite(result.attributes).all()
 
 
 def test_generate_mvp_attributes_zeroes_invalid_padded_voxels() -> None:

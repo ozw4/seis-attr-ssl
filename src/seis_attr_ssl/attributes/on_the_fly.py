@@ -405,19 +405,19 @@ def _reflect_pad_z(array: np.ndarray, pad_z: int) -> tuple[np.ndarray, int]:
 def _unpad_z(array: np.ndarray, pad_z: int) -> np.ndarray:
 	"""Remove symmetric z padding from a 3D [x, y, z] array."""
 	pad = _validate_nonnegative_int(pad_z, 'pad_z')
-	values = np.asarray(array, dtype=np.float32)
+	values = np.asarray(array)
 	if values.ndim != 3:
 		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
 		raise ValueError(msg)
 	if pad == 0:
-		return values.astype(np.float32, copy=True)
+		return values.copy()
 	if values.shape[2] < 2 * pad:
 		msg = (
 			'array z dimension is too small to remove requested padding; '
 			f'got z={values.shape[2]} and pad_z={pad}'
 		)
 		raise ValueError(msg)
-	return values[..., pad:-pad].astype(np.float32, copy=False)
+	return values[..., pad:-pad]
 
 
 def _gradient_magnitude(array: np.ndarray) -> np.ndarray:
@@ -507,7 +507,7 @@ def _phase_attributes(
 	amplitude: np.ndarray,
 	config: AttributeGenerationConfig,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-	analytic = _hilbert_z(amplitude)
+	analytic = _hilbert_z(amplitude, config)
 	phase = np.unwrap(np.angle(analytic), axis=2).astype(np.float32, copy=False)
 	phase_sin = np.sin(phase).astype(np.float32, copy=False)
 	phase_cos = np.cos(phase).astype(np.float32, copy=False)
@@ -524,7 +524,33 @@ def _phase_attributes(
 	)
 
 
-def _hilbert_z(amplitude: np.ndarray) -> np.ndarray:
+def _hilbert_z(
+	amplitude: np.ndarray,
+	config: AttributeGenerationConfig,
+) -> np.ndarray:
+	values = np.asarray(amplitude, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'amplitude must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
+	effective_pad = min(config.phase_reflect_pad_z, max(z_size - 1, 0))
+	if effective_pad == 0:
+		return _hilbert_z_unpadded(values)
+
+	padded, applied_pad = _reflect_pad_z(values, effective_pad)
+	if config.phase_taper_fraction > 0.0:
+		padded = _hann_taper_z(padded, config.phase_taper_fraction)
+	analytic = _unpad_z(_hilbert_z_unpadded(padded), applied_pad)
+	if analytic.shape != values.shape:
+		msg = (
+			'Hilbert analytic signal shape must match input shape; '
+			f'got {analytic.shape!r} and {values.shape!r}'
+		)
+		raise RuntimeError(msg)
+	return analytic
+
+
+def _hilbert_z_unpadded(amplitude: np.ndarray) -> np.ndarray:
 	z_size = amplitude.shape[2]
 	spectrum = np.fft.fft(amplitude, axis=2)
 	multiplier = np.zeros(z_size, dtype=np.float32)
