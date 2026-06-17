@@ -66,6 +66,12 @@ attribute_generation:
   instantaneous_frequency_clip_percentile: 99.5
   spectral_local_window_z: 65
   spectral_remove_dc: true
+  zero_mask:
+    enabled: true
+    zero_atol: 0.0
+    z_sample_influence_radius: 64
+    xy_trace_influence_radius: 1
+    z_trace_influence_radius: 0
 
 masking:
   spatial_mask_ratio: 0.75

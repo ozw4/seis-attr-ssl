@@ -182,6 +182,24 @@ attribute_groups:
   glcm_homogeneity: texture
 ```
 
+Zero-amplitude valid-mask defaults:
+
+```yaml
+attribute_generation:
+  zero_mask:
+    enabled: true
+    zero_atol: 0.0
+    z_sample_influence_radius: 64
+    xy_trace_influence_radius: 1
+    z_trace_influence_radius: 0
+```
+
+The MVP valid mask invalidates only all-zero z samples, all-zero traces, and the
+configured influence neighborhoods around those regions. Low S/N nonzero
+regions are not automatically masked. `amplitude_norm` may still be displayed,
+but invalid voxels are excluded from MAE reconstruction loss through
+`local_valid_mask`.
+
 ## 6. MVP Pipeline
 
 The main pipeline is:

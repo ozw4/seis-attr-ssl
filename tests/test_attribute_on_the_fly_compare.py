@@ -245,6 +245,13 @@ def test_default_visualization_config_pins_revised_attribute_qc_defaults() -> No
 		'instantaneous_frequency_clip_percentile': 99.5,
 		'spectral_local_window_z': 65,
 		'spectral_remove_dc': True,
+		'zero_mask': {
+			'enabled': True,
+			'zero_atol': 0.0,
+			'z_sample_influence_radius': 64,
+			'xy_trace_influence_radius': 1,
+			'z_trace_influence_radius': 0,
+		},
 	}
 	assert cfg['visualization']['grid_mode'] == 'auto'
 	assert cfg['visualization']['show_raw_amplitude'] is True

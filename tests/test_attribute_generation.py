@@ -373,7 +373,10 @@ def test_generate_mvp_attributes_zero_mask_disabled_preserves_valid_mask() -> No
 
 	result = generate_mvp_attributes(amp, config=config)
 
-	np.testing.assert_array_equal(result.voxel_valid_mask, np.ones_like(amp, dtype=bool))
+	np.testing.assert_array_equal(
+		result.voxel_valid_mask,
+		np.ones_like(amp, dtype=bool),
+	)
 	assert result.attributes[:, result.voxel_valid_mask].any()
 
 

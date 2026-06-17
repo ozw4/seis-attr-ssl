@@ -104,6 +104,40 @@ one.
 `glcm_contrast` and `glcm_homogeneity` are quantized finite-difference texture
 proxies, not full gray-level co-occurrence matrix estimates.
 
+## Zero-Amplitude Valid Mask
+
+Attribute generation also produces a voxel `valid_mask` used by visualization,
+dataset samples, and MAE reconstruction loss. The mask exists because deep or
+muted zero-amplitude regions can make phase, instantaneous frequency, spectral
+ratio, coherence, and texture proxy values unstable or meaningless.
+
+The MVP invalidates only deterministic zero-amplitude regions:
+
+```text
+1. z planes where all valid traces are zero
+2. traces where all valid z samples are zero
+3. configured influence neighborhoods around those regions
+```
+
+Low S/N nonzero regions are not automatically masked in this MVP. There is no
+envelope quantile, local energy quantile, or S/N-based signal-valid mask in the
+valid-mask workflow.
+
+The default `attribute_generation.zero_mask` settings are:
+
+```yaml
+attribute_generation:
+  zero_mask:
+    enabled: true
+    zero_atol: 0.0
+    z_sample_influence_radius: 64
+    xy_trace_influence_radius: 1
+    z_trace_influence_radius: 0
+```
+
+`amplitude_norm` may still be displayed in QC plots, but invalid voxels are
+excluded from MAE loss through `local_valid_mask`.
+
 ## Visualization QC
 
 The on-the-fly comparison config in
@@ -112,6 +146,10 @@ recommended `attribute_generation` defaults for checking reflect-padded phase,
 stabilized instantaneous frequency, and local z-window spectral ratios. Use XZ
 views to confirm spectral ratios change along z where the source trace changes
 frequency content.
+
+The visualization config enables `show_valid_mask` and `mask_invalid_values` by
+default so invalid zero-amplitude regions can be displayed explicitly and hidden
+from attribute panels with `invalid_color`.
 
 When using `use_known_ranges: true`, do not judge `glcm_homogeneity` only from a
 fixed `[0, 1]` color range. The proxy can saturate near 1, so percentile-clipped
