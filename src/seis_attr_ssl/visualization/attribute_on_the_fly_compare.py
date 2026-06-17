@@ -147,7 +147,11 @@ def _save_xy_png(  # noqa: PLR0913
 		stats,
 		assume_normalized=assume_normalized,
 	)
-	payload_slices = (slice(None), slice(None), slice(z_local, z_local + 1))
+	payload_slices = (
+		slice(0, norm_crop.shape[0]),
+		slice(0, norm_crop.shape[1]),
+		slice(z_local, z_local + 1),
+	)
 	result = generate_mvp_attributes_for_payload(
 		norm_crop,
 		payload_slices,
@@ -201,7 +205,11 @@ def _save_xz_png(  # noqa: PLR0913
 		stats,
 		assume_normalized=assume_normalized,
 	)
-	payload_slices = (slice(None), slice(y_local, y_local + 1), slice(None))
+	payload_slices = (
+		slice(0, norm_crop.shape[0]),
+		slice(y_local, y_local + 1),
+		slice(0, norm_crop.shape[2]),
+	)
 	result = generate_mvp_attributes_for_payload(
 		norm_crop,
 		payload_slices,
