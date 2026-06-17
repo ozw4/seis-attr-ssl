@@ -346,6 +346,11 @@ def _validate_train(train: Mapping[str, object]) -> None:
 		_validate_positive_int(train, 'max_steps', prefix='train')
 	if 'samples_per_epoch' in train:
 		_validate_positive_int(train, 'samples_per_epoch', prefix='train')
+	if (
+		'checkpoint_every_steps' in train
+		and train.get('checkpoint_every_steps') is not None
+	):
+		_validate_positive_int(train, 'checkpoint_every_steps', prefix='train')
 	if 'num_workers' in train:
 		_validate_nonnegative_int(train, 'num_workers', prefix='train')
 	if 'shuffle' in train:

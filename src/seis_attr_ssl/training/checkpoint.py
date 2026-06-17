@@ -18,6 +18,10 @@ def save_checkpoint(  # noqa: PLR0913
 	config: Mapping[str, object],
 	package_version: str | None = None,
 	metrics: Mapping[str, float] | None = None,
+	global_step: int | None = None,
+	amp_enabled: bool | None = None,
+	scaler: torch.amp.GradScaler | None = None,
+	training_state: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Write a training checkpoint and return its path."""
 	checkpoint_path = Path(path)
@@ -26,11 +30,16 @@ def save_checkpoint(  # noqa: PLR0913
 		'model_state_dict': model.state_dict(),
 		'optimizer_state_dict': optimizer.state_dict(),
 		'epoch': int(epoch),
+		'global_step': 0 if global_step is None else int(global_step),
+		'amp_enabled': False if amp_enabled is None else bool(amp_enabled),
+		'scaler_state_dict': None if scaler is None else scaler.state_dict(),
 		'config': _to_plain_value(config),
 		'package_version': package_version,
 	}
 	if metrics is not None:
 		payload['metrics'] = dict(metrics)
+	if training_state is not None:
+		payload['training_state'] = _to_plain_value(training_state)
 	torch.save(payload, checkpoint_path)
 	return checkpoint_path
 

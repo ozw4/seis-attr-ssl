@@ -151,11 +151,116 @@ def test_one_epoch_cpu_training_writes_loadable_checkpoint(tmp_path: Path) -> No
 	assert checkpoint_path.is_file()
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 	assert checkpoint['epoch'] == 1
+	assert checkpoint['global_step'] == 1
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
+	assert checkpoint['training_state']['schema_version'] == 1
+	assert checkpoint['training_state']['checkpoint_kind'] == 'epoch'
+	assert checkpoint['training_state']['batch_index'] is None
 	assert checkpoint['package_version'] == '0.1.0'
 	assert checkpoint['model_state_dict']
 	assert checkpoint['optimizer_state_dict']
 	loss = checkpoint['metrics']['loss']
 	assert np.isfinite(loss)
+
+
+def test_step_interval_checkpoints_and_latest_pointer(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['samples_per_epoch'] = 2
+	cfg['train']['max_steps'] = 2
+	cfg['train']['checkpoint_every_steps'] = 1
+
+	checkpoint_path = run_mae_pretraining(cfg)
+
+	output_root = Path(cfg['paths']['output_root'])
+	step_1_path = output_root / 'mae_step_00000001.pt'
+	step_2_path = output_root / 'mae_step_00000002.pt'
+	latest_path = output_root / 'mae_latest.pt'
+	assert checkpoint_path.name == 'mae_epoch_0001.pt'
+	assert step_1_path.is_file()
+	assert step_2_path.is_file()
+	assert latest_path.is_file()
+
+	step_2 = load_checkpoint(step_2_path, map_location='cpu')
+	assert step_2['global_step'] == 2
+	assert step_2['training_state']['schema_version'] == 1
+	assert step_2['training_state']['checkpoint_kind'] == 'step'
+	assert step_2['training_state']['batch_index'] == 1
+
+	epoch_checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
+	assert epoch_checkpoint['training_state']['checkpoint_kind'] == 'epoch'
+	assert epoch_checkpoint['training_state']['batch_index'] is None
+
+	latest = load_checkpoint(latest_path, map_location='cpu')
+	assert latest['global_step'] == 2
+
+
+def test_step_checkpoints_are_not_written_when_interval_is_unset(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['samples_per_epoch'] = 2
+	cfg['train']['max_steps'] = 2
+
+	run_mae_pretraining(cfg)
+
+	output_root = Path(cfg['paths']['output_root'])
+	assert not list(output_root.glob('mae_step_*.pt'))
+	assert (output_root / 'mae_latest.pt').is_file()
+
+
+def test_run_mae_pretraining_resumes_from_checkpoint_epoch_boundary(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['epochs'] = 2
+	resumed_checkpoint_path = run_mae_pretraining(
+		resume_cfg,
+		resume=checkpoint_path,
+	)
+
+	checkpoint = load_checkpoint(resumed_checkpoint_path, map_location='cpu')
+	assert resumed_checkpoint_path.name == 'mae_epoch_0002.pt'
+	assert checkpoint['epoch'] == 2
+	assert checkpoint['global_step'] == 2
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
+	assert checkpoint['optimizer_state_dict']
+
+
+def test_run_mae_pretraining_resume_validates_checkpoint_payload(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	missing_model_path = tmp_path / 'missing-model.pt'
+	missing_model = dict(payload)
+	missing_model.pop('model_state_dict')
+	torch.save(missing_model, missing_model_path)
+
+	with pytest.raises(ValueError, match='model_state_dict'):
+		run_mae_pretraining(cfg, resume=missing_model_path)
+
+	missing_optimizer_path = tmp_path / 'missing-optimizer.pt'
+	missing_optimizer = dict(payload)
+	missing_optimizer.pop('optimizer_state_dict')
+	torch.save(missing_optimizer, missing_optimizer_path)
+
+	with pytest.raises(ValueError, match='optimizer_state_dict'):
+		run_mae_pretraining(cfg, resume=missing_optimizer_path)
+
+	wrong_stage_path = tmp_path / 'wrong-stage.pt'
+	wrong_stage = dict(payload)
+	wrong_stage['config'] = {**wrong_stage['config'], 'stage': 'finetune_f3'}
+	torch.save(wrong_stage, wrong_stage_path)
+
+	with pytest.raises(ValueError, match='pretrain_mae'):
+		run_mae_pretraining(cfg, resume=wrong_stage_path)
 
 
 def test_one_epoch_cpu_training_records_grad_norm_when_clipping_enabled(
@@ -237,6 +342,8 @@ def test_amp_flag_on_cpu_does_not_enable_cuda_amp(tmp_path: Path) -> None:
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 
 	assert checkpoint['metrics']['amp_enabled'] == 0.0
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
 
 
 def test_nonfinite_mae_loss_writes_diagnostic_json(

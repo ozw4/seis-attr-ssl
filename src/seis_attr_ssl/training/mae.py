@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+import shutil
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -16,7 +17,7 @@ from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
 from seis_attr_ssl.data import NopimsAttributePretrainDataset, read_manifest_json
 from seis_attr_ssl.losses import mae_pretraining_loss
 from seis_attr_ssl.models.mae import StrictAttributeSetMAE3D
-from seis_attr_ssl.training.checkpoint import save_checkpoint
+from seis_attr_ssl.training.checkpoint import load_checkpoint, save_checkpoint
 from seis_attr_ssl.training.collate import move_batch_to_device
 from seis_attr_ssl.training.dataloaders import build_mae_dataloader
 from seis_attr_ssl.training.diagnostics import (
@@ -43,7 +44,21 @@ class MaeTrainingState:
 	amp_enabled: bool
 
 
-def train_mae_one_epoch(  # noqa: C901, PLR0913
+@dataclass(frozen=True)
+class MaeStepState:
+	"""State captured immediately after one MAE optimizer step."""
+
+	epoch: int
+	batch_index: int
+	global_step: int
+	metrics: dict[str, float]
+	amp_enabled: bool
+
+
+StepCallback = Callable[[MaeStepState], None]
+
+
+def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	model: torch.nn.Module,
 	dataloader: torch.utils.data.DataLoader,
@@ -58,6 +73,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 	max_steps: int | None = None,
 	diagnostics_dir: Path | None = None,
 	grad_clip_norm: float | None = None,
+	step_callback: StepCallback | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
@@ -120,6 +136,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 				msg = f'non-finite MAE loss at epoch {epoch}, step {global_step}'
 			raise FloatingPointError(msg)
 
+		current_grad_norm: float | None = None
 		if amp_enabled:
 			if scaler is None:
 				msg = 'scaler is required when amp_enabled is true'
@@ -143,9 +160,8 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
 				)
-				totals['grad_norm'] = totals.get('grad_norm', 0.0) + _grad_norm_float(
-					grad_norm,
-				)
+				current_grad_norm = _grad_norm_float(grad_norm)
+				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			scaler.step(optimizer)
 			scaler.update()
 		else:
@@ -167,15 +183,29 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
 				)
-				totals['grad_norm'] = totals.get('grad_norm', 0.0) + _grad_norm_float(
-					grad_norm,
-				)
+				current_grad_norm = _grad_norm_float(grad_norm)
+				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			optimizer.step()
 
+		step_metrics: dict[str, float] = {}
 		for key, value in losses.items():
-			totals[key] = totals.get(key, 0.0) + float(value.detach().cpu().item())
+			metric = float(value.detach().cpu().item())
+			step_metrics[key] = metric
+			totals[key] = totals.get(key, 0.0) + metric
+		if current_grad_norm is not None:
+			step_metrics['grad_norm'] = current_grad_norm
 		batches += 1
 		global_step += 1
+		if step_callback is not None:
+			step_callback(
+				MaeStepState(
+					epoch=epoch,
+					batch_index=batch_index,
+					global_step=global_step,
+					metrics=step_metrics,
+					amp_enabled=amp_enabled,
+				),
+			)
 
 	if batches == 0:
 		msg = 'dataloader produced no batches'
@@ -189,7 +219,11 @@ def train_mae_one_epoch(  # noqa: C901, PLR0913
 	)
 
 
-def run_mae_pretraining(config: Mapping[str, object]) -> Path:
+def run_mae_pretraining(
+	config: Mapping[str, object],
+	*,
+	resume: str | Path | None = None,
+) -> Path:
 	"""Run strict MAE pretraining from ``config`` and return the last checkpoint."""
 	_validate_no_f3_pretraining_config(config)
 	manifests = read_manifest_json(_manifest_train_path(config))
@@ -227,24 +261,65 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 		and torch.cuda.is_available()
 	)
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
+	start_epoch = 1
+	global_step = 0
+	if resume is not None:
+		payload = load_checkpoint(resume, map_location=device)
+		start_epoch, global_step = _restore_mae_checkpoint(
+			payload=payload,
+			model=model,
+			optimizer=optimizer,
+			scaler=scaler,
+			amp_enabled=amp_enabled,
+		)
 
 	output_root = Path(_str_config(paths_config, 'output_root'))
 	diagnostics_dir = _resolve_diagnostics_dir(train_config, output_root)
 	epochs = _int_config(train_config, 'epochs', 1)
 	max_steps = _optional_int_config(train_config, 'max_steps')
+	checkpoint_every_steps = _optional_int_config(
+		train_config,
+		'checkpoint_every_steps',
+	)
 	grad_clip_norm = _optional_positive_float_config(train_config, 'grad_clip_norm')
-	state: MaeTrainingState | None = None
+	state: MaeTrainingState | None = MaeTrainingState(
+		epoch=start_epoch - 1,
+		global_step=global_step,
+		metrics={},
+		amp_enabled=amp_enabled,
+	)
 	checkpoint_path: Path | None = None
-	for epoch in range(1, epochs + 1):
+	for epoch in range(start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
 			set_epoch(epoch - 1)
 		remaining_steps = None
 		if max_steps is not None:
-			previous_steps = 0 if state is None else state.global_step
-			remaining_steps = max_steps - previous_steps
+			remaining_steps = max_steps - state.global_step
 			if remaining_steps <= 0:
 				break
+
+		def save_step_checkpoint(step_state: MaeStepState) -> None:
+			nonlocal checkpoint_path
+			if (
+				checkpoint_every_steps is None
+				or step_state.global_step % checkpoint_every_steps != 0
+			):
+				return
+			checkpoint_path = _save_mae_checkpoint(
+				output_root / f'mae_step_{step_state.global_step:08d}.pt',
+				model=model,
+				optimizer=optimizer,
+				epoch=step_state.epoch,
+				config=config,
+				metrics=step_state.metrics,
+				global_step=step_state.global_step,
+				amp_enabled=step_state.amp_enabled,
+				scaler=scaler,
+				checkpoint_kind='step',
+				batch_index=step_state.batch_index,
+			)
+
 		state = train_mae_one_epoch(
 			model=model,
 			dataloader=dataloader,
@@ -255,28 +330,109 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			loss_config=loss_config,
 			amp_enabled=amp_enabled,
 			scaler=scaler,
-			global_step=0 if state is None else state.global_step,
+			global_step=state.global_step,
 			max_steps=remaining_steps,
 			diagnostics_dir=diagnostics_dir,
 			grad_clip_norm=grad_clip_norm,
+			step_callback=save_step_checkpoint,
 		)
 		print_epoch_metrics(epoch, state.metrics)
-		checkpoint_path = save_checkpoint(
+		checkpoint_path = _save_mae_checkpoint(
 			output_root / f'mae_epoch_{epoch:04d}.pt',
 			model=model,
 			optimizer=optimizer,
 			epoch=epoch,
 			config=config,
-			package_version=getattr(seis_attr_ssl, '__version__', None),
 			metrics={**state.metrics, 'amp_enabled': float(state.amp_enabled)},
+			global_step=state.global_step,
+			amp_enabled=state.amp_enabled,
+			scaler=scaler,
+			checkpoint_kind='epoch',
+			batch_index=None,
 		)
 		if max_steps is not None and state.global_step >= max_steps:
 			break
 
 	if checkpoint_path is None:
-		msg = 'train.epochs must be positive'
+		msg = 'no MAE training epochs were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _save_mae_checkpoint(  # noqa: PLR0913
+	path: Path,
+	*,
+	model: torch.nn.Module,
+	optimizer: torch.optim.Optimizer,
+	epoch: int,
+	config: Mapping[str, object],
+	metrics: Mapping[str, float],
+	global_step: int,
+	amp_enabled: bool,
+	scaler: torch.amp.GradScaler | None,
+	checkpoint_kind: Literal['step', 'epoch'],
+	batch_index: int | None,
+) -> Path:
+	checkpoint_path = save_checkpoint(
+		path,
+		model=model,
+		optimizer=optimizer,
+		epoch=epoch,
+		config=config,
+		package_version=getattr(seis_attr_ssl, '__version__', None),
+		metrics=metrics,
+		global_step=global_step,
+		amp_enabled=amp_enabled,
+		scaler=scaler,
+		training_state={
+			'schema_version': 1,
+			'checkpoint_kind': checkpoint_kind,
+			'batch_index': batch_index,
+		},
+	)
+	shutil.copy2(checkpoint_path, checkpoint_path.parent / 'mae_latest.pt')
+	return checkpoint_path
+
+
+def _restore_mae_checkpoint(
+	*,
+	payload: Mapping[str, object],
+	model: torch.nn.Module,
+	optimizer: torch.optim.Optimizer,
+	scaler: torch.amp.GradScaler | None,
+	amp_enabled: bool,
+) -> tuple[int, int]:
+	_validate_resume_payload(payload)
+	model.load_state_dict(payload['model_state_dict'])
+	optimizer.load_state_dict(payload['optimizer_state_dict'])
+	if amp_enabled and payload.get('scaler_state_dict') is not None:
+		if scaler is None:
+			msg = 'scaler is required when amp_enabled is true'
+			raise ValueError(msg)
+		scaler.load_state_dict(payload['scaler_state_dict'])
+	return int(payload['epoch']) + 1, int(payload.get('global_step', 0))
+
+
+def _validate_resume_payload(payload: Mapping[str, object]) -> None:
+	if 'model_state_dict' not in payload:
+		msg = 'resume checkpoint is missing model_state_dict'
+		raise ValueError(msg)
+	if 'optimizer_state_dict' not in payload:
+		msg = 'resume checkpoint is missing optimizer_state_dict'
+		raise ValueError(msg)
+	stage = _checkpoint_stage(payload)
+	if stage is not None and stage != 'pretrain_mae':
+		msg = f'resume checkpoint stage must be pretrain_mae; got {stage!r}'
+		raise ValueError(msg)
+
+
+def _checkpoint_stage(payload: Mapping[str, object]) -> object | None:
+	if 'stage' in payload:
+		return payload.get('stage')
+	config = payload.get('config')
+	if isinstance(config, Mapping):
+		return config.get('stage')
+	return None
 
 
 def _build_model(
@@ -572,6 +728,7 @@ def _loss_mode(value: object) -> Literal['huber', 'mse']:
 
 
 __all__ = [
+	'MaeStepState',
 	'MaeTrainingState',
 	'run_mae_pretraining',
 	'train_mae_one_epoch',

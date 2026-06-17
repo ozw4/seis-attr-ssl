@@ -35,6 +35,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 	"""Print a compact summary of validated configuration values."""
 	project = _mapping(cfg.get('project'))
 	paths = _mapping(cfg.get('paths'))
+	manifests = _mapping(cfg.get('manifests'))
 	data = _mapping(cfg.get('data'))
 	attributes = _mapping(cfg.get('attributes'))
 	masking = _mapping(cfg.get('masking'))
@@ -46,6 +47,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 		('project.name', project.get('name')),
 		('paths.nopims_root', paths.get('nopims_root')),
 		('paths.output_root', paths.get('output_root')),
+		('manifests.train', manifests.get('train')),
 		('data.grid_order', data.get('grid_order')),
 		('data.local_crop_size', data.get('local_crop_size')),
 		('data.context_crop_size', data.get('context_crop_size')),
@@ -69,20 +71,22 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 		)
 		if key in masking
 	)
-	if 'batch_size' in train:
-		rows.append(('train.batch_size', train.get('batch_size')))
-	if 'samples_per_epoch' in train:
-		rows.append(('train.samples_per_epoch', train.get('samples_per_epoch')))
-	if 'num_workers' in train:
-		rows.append(('train.num_workers', train.get('num_workers')))
-	if 'shuffle' in train:
-		rows.append(('train.shuffle', train.get('shuffle')))
-	if 'epochs' in train:
-		rows.append(('train.epochs', train.get('epochs')))
-	if 'device' in train:
-		rows.append(('train.device', train.get('device')))
-	if 'max_steps' in train:
-		rows.append(('train.max_steps', train.get('max_steps')))
+	rows.extend(
+		(f'train.{key}', train.get(key))
+		for key in (
+			'batch_size',
+			'samples_per_epoch',
+			'num_workers',
+			'shuffle',
+			'epochs',
+			'device',
+			'max_steps',
+			'grad_clip_norm',
+			'checkpoint_every_steps',
+			'diagnostics_dir',
+		)
+		if key in train
+	)
 
 	for key, value in rows:
 		print(f'{key}: {_format_value(value)}')
