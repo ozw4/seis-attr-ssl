@@ -120,6 +120,31 @@ def test_filter_nopims_manifest_by_stats_qc_missing_stats_excludes_survey(
 	assert outputs['path_list'].read_text(encoding='utf-8') == ''
 
 
+def test_filter_nopims_manifest_by_stats_qc_fail_if_empty(
+	tmp_path: Path,
+) -> None:
+	root = tmp_path / 'NOPIMS'
+	manifest_path = tmp_path / 'manifest.json'
+	path_list = tmp_path / 'train_npy_paths.txt'
+	outputs = _outputs(tmp_path)
+	_write_volume(root, 'survey-a')
+	write_manifest_json([_manifest(root, 'survey-a')], manifest_path)
+	path_list.write_text('survey-a.npy\n', encoding='utf-8')
+
+	result = run_python_proc(
+		SCRIPT,
+		*_args(root, manifest_path, path_list, outputs),
+		'--fail-if-empty',
+	)
+
+	assert result.returncode != 0
+	assert 'clean manifest or clean path-list is empty' in result.stderr
+	assert not outputs['qc_json'].exists()
+	assert not outputs['excluded_surveys'].exists()
+	assert not outputs['manifest'].exists()
+	assert not outputs['path_list'].exists()
+
+
 def test_filter_nopims_manifest_by_stats_qc_fails_on_unregistered_path_survey(
 	tmp_path: Path,
 ) -> None:

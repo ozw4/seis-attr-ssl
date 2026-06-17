@@ -111,6 +111,31 @@ def test_evaluate_stats_file_reports_missing_stats(tmp_path: Path) -> None:
 	assert item.error is not None
 
 
+def test_evaluate_stats_file_fallback_survey_id_strips_stats_suffix(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'survey-a.normalization_stats.json'
+
+	item = evaluate_normalization_stats_file(
+		path,
+		thresholds=NormalizationStatsQcThresholds(),
+	)
+
+	assert item.status == 'exclude'
+	assert item.survey_id == 'survey-a'
+	assert item.exclude_reasons == ('missing_stats',)
+
+	invalid_path = tmp_path / 'survey-b.normalization_stats.json'
+	invalid_path.write_text('{"survey_id": ', encoding='utf-8')
+	invalid_item = evaluate_normalization_stats_file(
+		invalid_path,
+		thresholds=NormalizationStatsQcThresholds(),
+	)
+	assert invalid_item.status == 'exclude'
+	assert invalid_item.survey_id == 'survey-b'
+	assert invalid_item.exclude_reasons == ('invalid_stats',)
+
+
 def test_evaluate_stats_file_reports_invalid_stats(tmp_path: Path) -> None:
 	path = tmp_path / 'survey-a.normalization_stats.json'
 	path.write_text('{"survey_id": ', encoding='utf-8')

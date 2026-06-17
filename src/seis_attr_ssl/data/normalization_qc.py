@@ -22,6 +22,7 @@ _EXCLUDE_REASON_ORDER = (
 	'large_norm_abs_max',
 )
 _FINITE_STAT_FIELDS = ('clip_low', 'clip_high', 'median', 'iqr', 'eps')
+_STATS_FILENAME_SUFFIX = '.normalization_stats.json'
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,7 @@ def evaluate_normalization_stats_file(
 	"""Load and evaluate a stats JSON file without raising on QC failures."""
 	path = Path(stats_path)
 	resolved_source_path = None if source_path is None else Path(source_path)
-	fallback_survey_id = survey_id or path.stem
+	fallback_survey_id = survey_id or _survey_id_from_stats_path(path)
 
 	if not path.exists():
 		return _excluded_item(
@@ -230,6 +231,13 @@ def _excluded_item(
 		norm_abs_max=None,
 		error=error,
 	)
+
+
+def _survey_id_from_stats_path(path: Path) -> str:
+	name = path.name
+	if name.endswith(_STATS_FILENAME_SUFFIX):
+		return name[: -len(_STATS_FILENAME_SUFFIX)]
+	return path.stem
 
 
 def _qc_item_to_dict(item: NormalizationStatsQcItem) -> dict[str, object]:

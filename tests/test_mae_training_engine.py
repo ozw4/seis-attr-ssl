@@ -323,6 +323,45 @@ def test_nonfinite_mae_loss_writes_diagnostic_json(
 	}
 
 
+def test_run_mae_pretraining_resolves_diagnostics_dir(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	def nan_loss(**_: object) -> dict[str, torch.Tensor]:
+		return {
+			'loss': torch.tensor(float('nan')),
+			'loss_reconstruction': torch.tensor(float('nan')),
+			'loss_dropped_attribute': torch.tensor(0.0),
+			'loss_gradient': torch.tensor(0.0),
+		}
+
+	monkeypatch.setattr('seis_attr_ssl.training.mae.mae_pretraining_loss', nan_loss)
+	cases = (
+		('default', None, Path('runs') / 'diagnostics'),
+		('relative', 'custom-diagnostics', Path('runs') / 'custom-diagnostics'),
+		(
+			'absolute',
+			str(tmp_path / 'absolute-diagnostics'),
+			tmp_path / 'absolute-diagnostics',
+		),
+	)
+	for case_name, diagnostics_dir, expected_dir in cases:
+		case_root = tmp_path / case_name
+		cfg = _tiny_config(case_root)
+		if diagnostics_dir is not None:
+			cfg['train']['diagnostics_dir'] = diagnostics_dir
+		expected_path = (
+			expected_dir
+			if expected_dir.is_absolute()
+			else case_root / expected_dir
+		) / 'nonfinite_mae_step_00000000.json'
+
+		with pytest.raises(FloatingPointError, match='diagnostic written to'):
+			run_mae_pretraining(cfg)
+
+		assert expected_path.is_file()
+
+
 def test_grad_clip_norm_calls_torch_clip_on_cpu(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
