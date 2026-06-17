@@ -6,7 +6,13 @@ import numpy as np
 import pytest
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY
+from seis_attr_ssl.attributes.on_the_fly import (
+	_reflect_pad_z,
+	_smooth_z_mean,
+	_unpad_z,
+)
 from seis_attr_ssl.data import (
+	AttributeGenerationConfig,
 	AttributeGenerationResult,
 	BaseSeismicVolumeRecord,
 	SurveyManifest,
@@ -15,6 +21,59 @@ from seis_attr_ssl.data import (
 	generate_mvp_attributes_for_payload,
 )
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
+
+
+def test_attribute_generation_config_default_validates() -> None:
+	AttributeGenerationConfig().validate()
+
+
+@pytest.mark.parametrize(
+	'kwargs',
+	[
+		{'phase_reflect_pad_z': -1},
+		{'phase_taper_fraction': -0.01},
+		{'phase_taper_fraction': 0.5},
+		{'instantaneous_frequency_smooth_z': 0},
+		{'instantaneous_frequency_smooth_z': 4},
+		{'instantaneous_frequency_envelope_quantile': -0.01},
+		{'instantaneous_frequency_envelope_quantile': 0.5},
+		{'instantaneous_frequency_clip_percentile': 49.9},
+		{'instantaneous_frequency_clip_percentile': 100.1},
+		{'spectral_local_window_z': 1},
+		{'spectral_local_window_z': 4},
+		{'spectral_remove_dc': 1},
+	],
+)
+def test_attribute_generation_config_rejects_invalid_new_settings(
+	kwargs: dict[str, object],
+) -> None:
+	with pytest.raises((TypeError, ValueError)):
+		AttributeGenerationConfig(**kwargs).validate()
+
+
+def test_smooth_z_mean_preserves_shape_and_finite_values() -> None:
+	array = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)
+
+	smoothed = _smooth_z_mean(array, 5)
+
+	assert smoothed.shape == array.shape
+	assert smoothed.dtype == np.float32
+	assert np.isfinite(smoothed).all()
+
+
+@pytest.mark.parametrize(('shape', 'pad_z'), [((2, 3, 5), 2), ((2, 3, 1), 3)])
+def test_reflect_pad_z_then_unpad_z_recovers_original(
+	shape: tuple[int, int, int],
+	pad_z: int,
+) -> None:
+	array = np.arange(np.prod(shape), dtype=np.float32).reshape(shape)
+
+	padded, applied_pad = _reflect_pad_z(array, pad_z)
+	recovered = _unpad_z(padded, applied_pad)
+
+	assert padded.shape == (shape[0], shape[1], shape[2] + (2 * pad_z))
+	assert recovered.shape == array.shape
+	np.testing.assert_array_equal(recovered, array)
 
 
 def test_generate_mvp_attributes_constant_cube_contract() -> None:

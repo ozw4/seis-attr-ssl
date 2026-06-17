@@ -36,6 +36,13 @@ class AttributeGenerationConfig:
 	spectral_mid_max_fraction: float = 0.60
 	glcm_levels: int = 16
 	output_clip: float = 1.0e6
+	phase_reflect_pad_z: int = 64
+	phase_taper_fraction: float = 0.05
+	instantaneous_frequency_smooth_z: int = 5
+	instantaneous_frequency_envelope_quantile: float = 0.05
+	instantaneous_frequency_clip_percentile: float = 99.5
+	spectral_local_window_z: int = 65
+	spectral_remove_dc: bool = True
 
 	def validate(self) -> None:
 		"""Validate numeric generation settings."""
@@ -66,6 +73,53 @@ class AttributeGenerationConfig:
 				f'got {self.output_clip!r}'
 			)
 			raise ValueError(msg)
+		_validate_nonnegative_int(self.phase_reflect_pad_z, 'phase_reflect_pad_z')
+		if (
+			not isinstance(self.phase_taper_fraction, Real)
+			or not 0.0 <= self.phase_taper_fraction < 0.5
+		):
+			msg = (
+				'phase_taper_fraction must satisfy 0.0 <= fraction < 0.5; '
+				f'got {self.phase_taper_fraction!r}'
+			)
+			raise ValueError(msg)
+		_validate_odd_positive_int(
+			self.instantaneous_frequency_smooth_z,
+			'instantaneous_frequency_smooth_z',
+		)
+		if (
+			not isinstance(self.instantaneous_frequency_envelope_quantile, Real)
+			or not 0.0 <= self.instantaneous_frequency_envelope_quantile < 0.5
+		):
+			msg = (
+				'instantaneous_frequency_envelope_quantile must satisfy '
+				'0.0 <= quantile < 0.5; got '
+				f'{self.instantaneous_frequency_envelope_quantile!r}'
+			)
+			raise ValueError(msg)
+		if (
+			not isinstance(self.instantaneous_frequency_clip_percentile, Real)
+			or not 50.0 <= self.instantaneous_frequency_clip_percentile <= 100.0
+		):
+			msg = (
+				'instantaneous_frequency_clip_percentile must satisfy '
+				'50.0 <= percentile <= 100.0; got '
+				f'{self.instantaneous_frequency_clip_percentile!r}'
+			)
+			raise ValueError(msg)
+		_validate_odd_positive_int(
+			self.spectral_local_window_z,
+			'spectral_local_window_z',
+		)
+		if self.spectral_local_window_z < 3:
+			msg = (
+				'spectral_local_window_z must be an odd integer >= 3; '
+				f'got {self.spectral_local_window_z!r}'
+			)
+			raise ValueError(msg)
+		if not isinstance(self.spectral_remove_dc, bool):
+			msg = f'spectral_remove_dc must be a bool; got {self.spectral_remove_dc!r}'
+			raise TypeError(msg)
 
 
 @dataclass(frozen=True)
@@ -250,6 +304,120 @@ def _validate_payload_slices_xyz(
 			)
 			raise ValueError(msg)
 	return slices_xyz
+
+
+def _validate_odd_positive_int(value: int, name: str) -> int:
+	"""Return value as int after validating it is odd and positive."""
+	if isinstance(value, bool):
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise TypeError(msg)
+	try:
+		integer = index(value)
+	except TypeError as exc:
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise TypeError(msg) from exc
+	if integer < 1 or integer % 2 == 0:
+		msg = f'{name} must be an odd positive integer; got {value!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _validate_nonnegative_int(value: int, name: str) -> int:
+	"""Return value as int after validating it is non-negative."""
+	if isinstance(value, bool):
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise TypeError(msg)
+	try:
+		integer = index(value)
+	except TypeError as exc:
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise TypeError(msg) from exc
+	if integer < 0:
+		msg = f'{name} must be a non-negative integer; got {value!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _safe_percentile(values: np.ndarray, percentile: float, default: float) -> float:
+	"""Compute a percentile over finite values, falling back when none exist."""
+	array = np.asarray(values, dtype=np.float32)
+	finite = array[np.isfinite(array)]
+	if finite.size == 0:
+		return float(default)
+	return float(np.percentile(finite, percentile))
+
+
+def _smooth_z_mean(array: np.ndarray, window_z: int) -> np.ndarray:
+	"""Mean-smooth a 3D [x, y, z] array along z while preserving shape."""
+	window = _validate_odd_positive_int(window_z, 'window_z')
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if values.shape[2] == 0 or window == 1:
+		return values.astype(np.float32, copy=True)
+	pad = window // 2
+	padded = np.pad(values, ((0, 0), (0, 0), (pad, pad)), mode='edge')
+	zero = np.zeros((*padded.shape[:2], 1), dtype=np.float32)
+	cumsum = np.cumsum(
+		np.concatenate((zero, padded), axis=2),
+		axis=2,
+		dtype=np.float32,
+	)
+	smoothed = (cumsum[..., window:] - cumsum[..., :-window]) / np.float32(window)
+	return smoothed.astype(np.float32, copy=False)
+
+
+def _hann_taper_z(array: np.ndarray, fraction: float) -> np.ndarray:
+	"""Apply a symmetric Hann taper to the leading/trailing z edges."""
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if not isinstance(fraction, Real) or not 0.0 <= fraction < 0.5:
+		msg = f'fraction must satisfy 0.0 <= fraction < 0.5; got {fraction!r}'
+		raise ValueError(msg)
+	z_size = values.shape[2]
+	taper_size = int(np.floor(z_size * float(fraction)))
+	if taper_size < 1:
+		return values.astype(np.float32, copy=True)
+	window = np.ones(z_size, dtype=np.float32)
+	edge = np.hanning((2 * taper_size) + 2).astype(np.float32)[1 : taper_size + 1]
+	window[:taper_size] = edge
+	window[-taper_size:] = edge[::-1]
+	return (values * window.reshape(1, 1, z_size)).astype(np.float32, copy=False)
+
+
+def _reflect_pad_z(array: np.ndarray, pad_z: int) -> tuple[np.ndarray, int]:
+	"""Reflect-pad a 3D [x, y, z] array along z and return the applied pad."""
+	pad = _validate_nonnegative_int(pad_z, 'pad_z')
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if pad == 0 or values.shape[2] == 0:
+		return values.astype(np.float32, copy=True), 0
+	mode = 'reflect' if values.shape[2] > 1 else 'edge'
+	padded = np.pad(values, ((0, 0), (0, 0), (pad, pad)), mode=mode)
+	return padded.astype(np.float32, copy=False), pad
+
+
+def _unpad_z(array: np.ndarray, pad_z: int) -> np.ndarray:
+	"""Remove symmetric z padding from a 3D [x, y, z] array."""
+	pad = _validate_nonnegative_int(pad_z, 'pad_z')
+	values = np.asarray(array, dtype=np.float32)
+	if values.ndim != 3:
+		msg = f'array must be a 3D [x, y, z] array; got ndim={values.ndim}'
+		raise ValueError(msg)
+	if pad == 0:
+		return values.astype(np.float32, copy=True)
+	if values.shape[2] < 2 * pad:
+		msg = (
+			'array z dimension is too small to remove requested padding; '
+			f'got z={values.shape[2]} and pad_z={pad}'
+		)
+		raise ValueError(msg)
+	return values[..., pad:-pad].astype(np.float32, copy=False)
 
 
 def _gradient_magnitude(array: np.ndarray) -> np.ndarray:
