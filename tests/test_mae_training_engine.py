@@ -151,6 +151,10 @@ def test_one_epoch_cpu_training_writes_loadable_checkpoint(tmp_path: Path) -> No
 	assert checkpoint_path.is_file()
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 	assert checkpoint['epoch'] == 1
+	assert checkpoint['global_step'] == 1
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
+	assert checkpoint['training_state']['schema_version'] == 1
 	assert checkpoint['package_version'] == '0.1.0'
 	assert checkpoint['model_state_dict']
 	assert checkpoint['optimizer_state_dict']
@@ -237,6 +241,8 @@ def test_amp_flag_on_cpu_does_not_enable_cuda_amp(tmp_path: Path) -> None:
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 
 	assert checkpoint['metrics']['amp_enabled'] == 0.0
+	assert checkpoint['amp_enabled'] is False
+	assert checkpoint['scaler_state_dict'] is None
 
 
 def test_nonfinite_mae_loss_writes_diagnostic_json(

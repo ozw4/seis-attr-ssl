@@ -269,6 +269,10 @@ def run_mae_pretraining(config: Mapping[str, object]) -> Path:
 			config=config,
 			package_version=getattr(seis_attr_ssl, '__version__', None),
 			metrics={**state.metrics, 'amp_enabled': float(state.amp_enabled)},
+			global_step=state.global_step,
+			amp_enabled=state.amp_enabled,
+			scaler=scaler,
+			training_state={'schema_version': 1},
 		)
 		if max_steps is not None and state.global_step >= max_steps:
 			break
