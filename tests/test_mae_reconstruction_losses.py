@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from seis_attr_ssl.losses import (
+	dropped_attribute_reconstruction_loss,
 	mae_pretraining_loss,
 	masked_patch_reconstruction_loss,
 )
@@ -156,6 +157,115 @@ def test_local_valid_mask_keeps_only_valid_patch_loss() -> None:
 	)
 
 	assert losses['loss_reconstruction'] == torch.tensor(1.0)
+
+
+def test_mixed_local_valid_patch_accumulates_only_valid_voxels() -> None:
+	target = torch.zeros((1, 1, 2, 2, 2))
+	pred_patches = torch.arange(1, 9, dtype=torch.float32).reshape(1, 1, 1, 8)
+	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
+	local_valid_mask[:, 0, 0, 0] = False
+	local_valid_mask[:, 1, 1, 1] = False
+	valid_voxels = patchify_3d(local_valid_mask.unsqueeze(1), PATCH_SIZE_XYZ)
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	expected = pred_patches[valid_voxels].square().mean()
+	assert loss == expected
+
+
+def test_invalid_voxels_inside_local_valid_patch_do_not_affect_loss() -> None:
+	target = torch.zeros((1, 1, 2, 2, 2))
+	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
+	local_valid_mask[:, 0, 0, 0] = False
+	local_valid_mask[:, 1, 1, 1] = False
+	valid_voxels = patchify_3d(local_valid_mask.unsqueeze(1), PATCH_SIZE_XYZ)
+	pred_patches = torch.ones((1, 1, 1, 8))
+	pred_patches_with_invalid_errors = pred_patches.clone()
+	pred_patches_with_invalid_errors[~valid_voxels] = 100.0
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+	loss_with_invalid_errors = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches_with_invalid_errors,
+		target=target,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	assert loss_with_invalid_errors == loss
+
+
+def test_fully_invalid_local_valid_patch_produces_zero_loss() -> None:
+	target = torch.zeros((1, 1, 2, 2, 2))
+	pred_patches = torch.full((1, 1, 1, 8), 10.0)
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		local_valid_mask=torch.zeros((1, 2, 2, 2), dtype=torch.bool),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	assert loss == torch.tensor(0.0)
+
+
+def test_no_local_valid_mask_still_uses_all_selected_voxels() -> None:
+	target = torch.zeros((1, 1, 2, 2, 2))
+	pred_patches = torch.arange(1, 9, dtype=torch.float32).reshape(1, 1, 1, 8)
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	assert loss == pred_patches.square().mean()
+
+
+def test_dropped_attribute_loss_applies_local_valid_mask_per_voxel() -> None:
+	target = torch.zeros((1, 1, 2, 2, 2))
+	pred_patches = torch.ones((1, 1, 1, 8))
+	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
+	local_valid_mask[:, 0, 0, 0] = False
+	local_valid_mask[:, 1, 1, 1] = False
+	valid_voxels = patchify_3d(local_valid_mask.unsqueeze(1), PATCH_SIZE_XYZ)
+	pred_patches[~valid_voxels] = 100.0
+
+	loss = dropped_attribute_reconstruction_loss(
+		pred_patches=pred_patches,
+		target=target,
+		target_valid=torch.ones((1, 1), dtype=torch.bool),
+		dropped_attribute_mask=torch.ones((1, 1), dtype=torch.bool),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	assert loss == torch.tensor(1.0)
 
 
 def test_local_valid_mask_shape_mismatch_raises() -> None:

@@ -40,19 +40,19 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 		pred_patches.shape[0],
 		pred_patches.shape[1],
 	)
-	valid_patch_mask = _local_valid_patch_mask(
+	local_valid_patch_voxels = _local_valid_patch_voxels(
 		local_valid_mask=local_valid_mask,
 		pred_patches=pred_patches,
 		target=target,
 		patch_size_xyz=patch_size_xyz,
 		valid_patch_min_fraction=valid_patch_min_fraction,
 	)
-	if valid_patch_mask is not None:
-		selection = selection & valid_patch_mask
 	selection = (
 		selection.unsqueeze(-1).unsqueeze(-1)
 		& target_valid.unsqueeze(1).unsqueeze(-1)
 	)
+	if local_valid_patch_voxels is not None:
+		selection = selection & local_valid_patch_voxels
 	return _weighted_mean(
 		_elementwise_loss(
 			pred_patches,
@@ -98,23 +98,18 @@ def dropped_attribute_reconstruction_loss(  # noqa: PLR0913
 	)
 	_validate_same_device(pred_patches, target, target_valid, dropped_attribute_mask)
 
-	valid_patch_mask = _local_valid_patch_mask(
+	local_valid_patch_voxels = _local_valid_patch_voxels(
 		local_valid_mask=local_valid_mask,
 		pred_patches=pred_patches,
 		target=target,
 		patch_size_xyz=patch_size_xyz,
 		valid_patch_min_fraction=valid_patch_min_fraction,
 	)
-	if valid_patch_mask is None:
-		valid_patch_mask = torch.ones(
-			(pred_patches.shape[0], pred_patches.shape[1]),
-			dtype=torch.bool,
-			device=pred_patches.device,
-		)
 	selection = (
-		valid_patch_mask.unsqueeze(-1).unsqueeze(-1)
-		& (target_valid & dropped_attribute_mask).unsqueeze(1).unsqueeze(-1)
+		(target_valid & dropped_attribute_mask).unsqueeze(1).unsqueeze(-1)
 	)
+	if local_valid_patch_voxels is not None:
+		selection = selection & local_valid_patch_voxels
 	return _weighted_mean(
 		_elementwise_loss(
 			pred_patches,
@@ -248,7 +243,7 @@ def _elementwise_loss(
 	raise ValueError(msg)
 
 
-def _local_valid_patch_mask(
+def _local_valid_patch_voxels(
 	*,
 	local_valid_mask: torch.Tensor | None,
 	pred_patches: torch.Tensor,
@@ -266,19 +261,25 @@ def _local_valid_patch_mask(
 			f'got {valid_patch_min_fraction!r}'
 		)
 		raise ValueError(msg)
-	patches = patchify_3d(
-		local_valid_mask.unsqueeze(1).to(dtype=pred_patches.dtype),
+	patch_voxels = patchify_3d(
+		local_valid_mask.unsqueeze(1),
 		patch_size_xyz,
 	)
-	valid_fraction = patches.squeeze(2).mean(dim=-1)
-	if valid_fraction.shape != (pred_patches.shape[0], pred_patches.shape[1]):
+	expected_shape = (
+		pred_patches.shape[0],
+		pred_patches.shape[1],
+		1,
+		pred_patches.shape[3],
+	)
+	if tuple(patch_voxels.shape) != expected_shape:
 		msg = (
-			'patchified local_valid_mask must match pred_patches patch grid; '
-			f'got {tuple(valid_fraction.shape)!r} and '
-			f'{(pred_patches.shape[0], pred_patches.shape[1])!r}'
+			'patchified local_valid_mask must match pred_patches patch layout; '
+			f'got {tuple(patch_voxels.shape)!r} and {expected_shape!r}'
 		)
 		raise ValueError(msg)
-	return valid_fraction > valid_patch_min_fraction
+	valid_fraction = patch_voxels.to(dtype=pred_patches.dtype).squeeze(2).mean(dim=-1)
+	valid_patch_mask = valid_fraction > valid_patch_min_fraction
+	return patch_voxels & valid_patch_mask.unsqueeze(-1).unsqueeze(-1)
 
 
 def _validate_local_valid_mask(
