@@ -72,6 +72,9 @@ def main() -> None:
 			),  # type: ignore[arg-type]
 			show_raw_amplitude=bool(vis_cfg.get('show_raw_amplitude', True)),
 			use_known_ranges=bool(vis_cfg.get('use_known_ranges', True)),
+			show_valid_mask=bool(vis_cfg.get('show_valid_mask', True)),
+			mask_invalid_values=bool(vis_cfg.get('mask_invalid_values', True)),
+			invalid_color=str(vis_cfg.get('invalid_color', 'lightgray')),
 			dpi=int(vis_cfg.get('dpi', 200)),
 			figure_height=float(vis_cfg.get('figure_height', 4.0)),
 			panel_width=float(vis_cfg.get('panel_width', 4.0)),

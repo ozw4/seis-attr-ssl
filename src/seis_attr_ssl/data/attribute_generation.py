@@ -5,6 +5,7 @@ from __future__ import annotations
 from seis_attr_ssl.attributes.on_the_fly import (
 	AttributeGenerationConfig,
 	AttributeGenerationResult,
+	ZeroAmplitudeMaskConfig,
 	attribute_generation_config_from_mapping,
 	center_trim_attribute_result,
 	generate_mvp_attributes,
@@ -14,6 +15,7 @@ from seis_attr_ssl.attributes.on_the_fly import (
 __all__ = [
 	'AttributeGenerationConfig',
 	'AttributeGenerationResult',
+	'ZeroAmplitudeMaskConfig',
 	'attribute_generation_config_from_mapping',
 	'center_trim_attribute_result',
 	'generate_mvp_attributes',

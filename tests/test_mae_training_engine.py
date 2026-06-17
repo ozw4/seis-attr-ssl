@@ -528,6 +528,7 @@ def _mae_sample(
 		'attribute_ids': np.asarray(attribute_ids, dtype=np.int64),
 		'spatial_mask': np.ones((2, 2, 2), dtype=np.bool_),
 		'visible_spatial_mask': np.zeros((2, 2, 2), dtype=np.bool_),
+		'local_valid_mask': np.ones((4, 4, 4), dtype=np.bool_),
 		'attribute_input_mask': np.ones(target_channel_count, dtype=np.bool_),
 		'attribute_target_mask': np.ones(target_channel_count, dtype=np.bool_),
 		'dropped_attribute_mask': np.zeros(

@@ -36,12 +36,22 @@ class OnTheFlyAttributeCompareConfig:
 	clip_percentiles: tuple[float, float] = (1.0, 99.0)
 	show_raw_amplitude: bool = True
 	use_known_ranges: bool = True
+	show_valid_mask: bool = True
+	mask_invalid_values: bool = True
+	invalid_color: str = 'lightgray'
 	dpi: int = 200
 	figure_height: float = 4.0
 	panel_width: float = 4.0
 	xy_aspect: str = 'equal'
 	xz_aspect: str = 'auto'
 	grid_mode: str = 'auto'
+
+
+@dataclass(frozen=True)
+class _Panel:
+	name: str
+	image: np.ndarray
+	valid_mask: np.ndarray | None = None
 
 
 _KNOWN_RANGES: dict[str, tuple[float, float]] = {
@@ -52,6 +62,7 @@ _KNOWN_RANGES: dict[str, tuple[float, float]] = {
 	'spectral_high_ratio': (0.0, 1.0),
 	'coherence': (0.0, 1.0),
 	'glcm_homogeneity': (0.0, 1.0),
+	'valid_mask': (0.0, 1.0),
 }
 
 
@@ -150,7 +161,7 @@ def _save_xy_png(  # noqa: PLR0913
 	payload_slices = (
 		slice(0, norm_crop.shape[0]),
 		slice(0, norm_crop.shape[1]),
-		slice(z_local, z_local + 1),
+		slice(0, norm_crop.shape[2]),
 	)
 	result = generate_mvp_attributes_for_payload(
 		norm_crop,
@@ -158,11 +169,16 @@ def _save_xy_png(  # noqa: PLR0913
 		config=attribute_generation_config,
 	)
 
-	panels: list[tuple[str, np.ndarray]] = []
-	if config.show_raw_amplitude:
-		panels.append(('raw_amplitude', raw_crop[:, :, z_local].T))
-	for name, attr_id in zip(names, ids, strict=True):
-		panels.append((name, result.attributes[attr_id, :, :, 0].T))
+	valid_2d = result.voxel_valid_mask[:, :, z_local].T
+	panels = _build_panels(
+		raw_amplitude=raw_crop[:, :, z_local].T,
+		attribute_images=[
+			(name, result.attributes[attr_id, :, :, z_local].T)
+			for name, attr_id in zip(names, ids, strict=True)
+		],
+		valid_mask_2d=valid_2d,
+		config=config,
+	)
 
 	_plot_panels(
 		panels,
@@ -207,7 +223,7 @@ def _save_xz_png(  # noqa: PLR0913
 	)
 	payload_slices = (
 		slice(0, norm_crop.shape[0]),
-		slice(y_local, y_local + 1),
+		slice(0, norm_crop.shape[1]),
 		slice(0, norm_crop.shape[2]),
 	)
 	result = generate_mvp_attributes_for_payload(
@@ -216,11 +232,16 @@ def _save_xz_png(  # noqa: PLR0913
 		config=attribute_generation_config,
 	)
 
-	panels: list[tuple[str, np.ndarray]] = []
-	if config.show_raw_amplitude:
-		panels.append(('raw_amplitude', raw_crop[:, y_local, :].T))
-	for name, attr_id in zip(names, ids, strict=True):
-		panels.append((name, result.attributes[attr_id, :, 0, :].T))
+	valid_2d = result.voxel_valid_mask[:, y_local, :].T
+	panels = _build_panels(
+		raw_amplitude=raw_crop[:, y_local, :].T,
+		attribute_images=[
+			(name, result.attributes[attr_id, :, y_local, :].T)
+			for name, attr_id in zip(names, ids, strict=True)
+		],
+		valid_mask_2d=valid_2d,
+		config=config,
+	)
 
 	_plot_panels(
 		panels,
@@ -264,8 +285,27 @@ def _centered_interval(
 	return start, stop, center - start
 
 
+def _build_panels(
+	*,
+	raw_amplitude: np.ndarray,
+	attribute_images: Sequence[tuple[str, np.ndarray]],
+	valid_mask_2d: np.ndarray,
+	config: OnTheFlyAttributeCompareConfig,
+) -> list[_Panel]:
+	valid_mask = np.asarray(valid_mask_2d, dtype=bool)
+	panels: list[_Panel] = []
+	if config.show_raw_amplitude:
+		panels.append(_Panel('raw_amplitude', raw_amplitude, valid_mask))
+	for name, image in attribute_images:
+		panels.append(_Panel(name, image, valid_mask))
+	if config.show_valid_mask:
+		# valid_mask panel convention: 1 = valid voxel, 0 = invalid voxel.
+		panels.append(_Panel('valid_mask', valid_mask.astype(np.float32)))
+	return panels
+
+
 def _plot_panels(  # noqa: PLR0913
-	panels: Sequence[tuple[str, np.ndarray]],
+	panels: Sequence[_Panel],
 	title: str,
 	out_path: Path,
 	xlabel: str,
@@ -282,9 +322,10 @@ def _plot_panels(  # noqa: PLR0913
 		squeeze=False,
 	)
 	flat_axes = list(axes.ravel())
-	for ax, (name, image) in zip(flat_axes, panels, strict=False):
+	for ax, panel in zip(flat_axes, panels, strict=False):
+		image = _display_image(panel, config)
 		vmin, vmax = _display_limits(
-			name,
+			panel.name,
 			image,
 			config.clip_percentiles,
 			use_known_ranges=config.use_known_ranges,
@@ -293,11 +334,11 @@ def _plot_panels(  # noqa: PLR0913
 			image,
 			origin='upper',
 			aspect=aspect,
-			cmap=_cmap_for_name(name),
+			cmap=_cmap_for_panel(panel, config),
 			vmin=vmin,
 			vmax=vmax,
 		)
-		ax.set_title(name)
+		ax.set_title(panel.name)
 		ax.set_xlabel(xlabel)
 		ax.set_ylabel(ylabel)
 		fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
@@ -313,6 +354,13 @@ def _plot_panels(  # noqa: PLR0913
 def _resolve_grid(n_panels: int, grid_mode: str) -> tuple[int, int]:
 	mode = str(grid_mode).strip().lower()
 	if mode == 'auto':
+		if n_panels <= 0:
+			msg = f'n_panels must be positive; got {n_panels!r}'
+			raise ValueError(msg)
+		if n_panels == 10:
+			return 2, 5
+		if 11 <= n_panels <= 12:
+			return 3, 4
 		ncols = math.ceil(math.sqrt(n_panels))
 		nrows = math.ceil(n_panels / ncols)
 		return nrows, ncols
@@ -345,7 +393,7 @@ def _display_limits(
 	if use_known_ranges and name in _KNOWN_RANGES:
 		return _KNOWN_RANGES[name]
 
-	finite = image[np.isfinite(image)]
+	finite = np.ma.masked_invalid(image).compressed()
 	if finite.size == 0:
 		return None, None
 	vmin, vmax = np.percentile(finite, clip_percentiles)
@@ -356,10 +404,36 @@ def _display_limits(
 	return float(vmin), float(vmax)
 
 
-def _cmap_for_name(name: str) -> str:
-	if name.startswith('phase_'):
-		return 'twilight'
-	return 'viridis'
+def _display_image(
+	panel: _Panel,
+	config: OnTheFlyAttributeCompareConfig,
+) -> np.ndarray | np.ma.MaskedArray:
+	if (
+		not config.mask_invalid_values
+		or panel.valid_mask is None
+		or panel.name == 'valid_mask'
+	):
+		return panel.image
+	return np.ma.masked_where(~panel.valid_mask, panel.image)
+
+
+def _cmap_for_panel(
+	panel: _Panel,
+	config: OnTheFlyAttributeCompareConfig,
+) -> str | plt.Colormap:
+	if panel.name == 'valid_mask':
+		return 'gray'
+	name = panel.name
+	cmap_name = 'twilight' if name.startswith('phase_') else 'viridis'
+	if (
+		not config.mask_invalid_values
+		or panel.valid_mask is None
+		or panel.valid_mask.all()
+	):
+		return cmap_name
+	cmap = plt.get_cmap(cmap_name).copy()
+	cmap.set_bad(config.invalid_color)
+	return cmap
 
 
 def _resolve_attribute_names(

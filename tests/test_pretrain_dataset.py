@@ -14,6 +14,7 @@ from seis_attr_ssl.data import (
 	BaseSeismicVolumeRecord,
 	CropRequest,
 	SurveyManifest,
+	ZeroAmplitudeMaskConfig,
 )
 from seis_attr_ssl.data.attribute_subset import sample_attribute_subset
 from seis_attr_ssl.data.pretrain_dataset import NopimsAttributePretrainDataset
@@ -259,6 +260,34 @@ def test_pretrain_dataset_generates_attributes_from_base_seismic(
 		np.testing.assert_array_equal(sample['x'][row], sample['target'][id_])
 
 
+def test_pretrain_dataset_base_local_valid_mask_includes_zero_trace_region(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_base_manifest(tmp_path / 'survey-a', shape_xyz=LOCAL_SIZE)
+	base_path = manifest.root / manifest.base_seismic.path
+	base = np.ones(LOCAL_SIZE, dtype=np.float32)
+	base[1, 1, :] = 0.0
+	np.save(base_path, base)
+	dataset = _dataset(
+		manifest,
+		use_context=False,
+		local_attribute_halo_xyz=(0, 0, 0),
+		attribute_generation_config=AttributeGenerationConfig(
+			zero_mask=ZeroAmplitudeMaskConfig(
+				z_sample_influence_radius=0,
+				xy_trace_influence_radius=1,
+			),
+		),
+	)
+
+	sample = dataset[0]
+
+	expected = np.ones(LOCAL_SIZE, dtype=bool)
+	expected[0:3, 0:3, :] = False
+	np.testing.assert_array_equal(sample['local_valid_mask'], expected)
+	assert not sample['target'][:, ~expected].any()
+
+
 def test_pretrain_dataset_reads_base_target_with_local_halo(
 	tmp_path: Path,
 ) -> None:
@@ -430,6 +459,9 @@ def test_pretrain_dataset_attribute_generation_config_changes_spectral_output(
 		min_input_attributes=2,
 		max_input_attributes=2,
 		seed=1,
+		attribute_generation_config=AttributeGenerationConfig(
+			zero_mask=ZeroAmplitudeMaskConfig(enabled=False),
+		),
 	)
 	custom_dataset = NopimsAttributePretrainDataset(
 		[manifest],
@@ -444,6 +476,7 @@ def test_pretrain_dataset_attribute_generation_config_changes_spectral_output(
 		seed=1,
 		attribute_generation_config=AttributeGenerationConfig(
 			spectral_local_window_z=3,
+			zero_mask=ZeroAmplitudeMaskConfig(enabled=False),
 		),
 	)
 

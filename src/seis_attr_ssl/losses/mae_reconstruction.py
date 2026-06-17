@@ -20,6 +20,8 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 	spatial_mask: torch.Tensor,
 	target_valid: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
+	local_valid_mask: torch.Tensor | None = None,
+	valid_patch_min_fraction: float = 0.5,
 	reconstruction: LossMode = 'huber',
 	huber_delta: float = 1.0,
 	family_balanced: bool = True,
@@ -38,6 +40,15 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 		pred_patches.shape[0],
 		pred_patches.shape[1],
 	)
+	valid_patch_mask = _local_valid_patch_mask(
+		local_valid_mask=local_valid_mask,
+		pred_patches=pred_patches,
+		target=target,
+		patch_size_xyz=patch_size_xyz,
+		valid_patch_min_fraction=valid_patch_min_fraction,
+	)
+	if valid_patch_mask is not None:
+		selection = selection & valid_patch_mask
 	selection = (
 		selection.unsqueeze(-1).unsqueeze(-1)
 		& target_valid.unsqueeze(1).unsqueeze(-1)
@@ -56,7 +67,7 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 			dtype=pred_patches.dtype,
 			family_balanced=family_balanced,
 		),
-		empty='raise',
+		empty='zero' if local_valid_mask is not None else 'raise',
 	)
 
 
@@ -67,6 +78,8 @@ def dropped_attribute_reconstruction_loss(  # noqa: PLR0913
 	target_valid: torch.Tensor,
 	dropped_attribute_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
+	local_valid_mask: torch.Tensor | None = None,
+	valid_patch_min_fraction: float = 0.5,
 	reconstruction: LossMode = 'huber',
 	huber_delta: float = 1.0,
 	family_balanced: bool = True,
@@ -85,7 +98,23 @@ def dropped_attribute_reconstruction_loss(  # noqa: PLR0913
 	)
 	_validate_same_device(pred_patches, target, target_valid, dropped_attribute_mask)
 
-	selection = (target_valid & dropped_attribute_mask).unsqueeze(1).unsqueeze(-1)
+	valid_patch_mask = _local_valid_patch_mask(
+		local_valid_mask=local_valid_mask,
+		pred_patches=pred_patches,
+		target=target,
+		patch_size_xyz=patch_size_xyz,
+		valid_patch_min_fraction=valid_patch_min_fraction,
+	)
+	if valid_patch_mask is None:
+		valid_patch_mask = torch.ones(
+			(pred_patches.shape[0], pred_patches.shape[1]),
+			dtype=torch.bool,
+			device=pred_patches.device,
+		)
+	selection = (
+		valid_patch_mask.unsqueeze(-1).unsqueeze(-1)
+		& (target_valid & dropped_attribute_mask).unsqueeze(1).unsqueeze(-1)
+	)
 	return _weighted_mean(
 		_elementwise_loss(
 			pred_patches,
@@ -117,6 +146,8 @@ def mae_pretraining_loss(  # noqa: PLR0913
 	dropped_attribute_weight: float = 0.25,
 	gradient_weight: float = 0.05,
 	family_balanced: bool = True,
+	local_valid_mask: torch.Tensor | None = None,
+	valid_patch_min_fraction: float = 0.5,
 ) -> dict[str, torch.Tensor]:
 	"""Return total strict MAE pretraining loss and component scalars."""
 	loss_reconstruction = masked_patch_reconstruction_loss(
@@ -125,6 +156,8 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		spatial_mask=spatial_mask,
 		target_valid=target_valid,
 		patch_size_xyz=patch_size_xyz,
+		local_valid_mask=local_valid_mask,
+		valid_patch_min_fraction=valid_patch_min_fraction,
 		reconstruction=reconstruction,
 		huber_delta=huber_delta,
 		family_balanced=family_balanced,
@@ -135,6 +168,8 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		target_valid=target_valid,
 		dropped_attribute_mask=dropped_attribute_mask,
 		patch_size_xyz=patch_size_xyz,
+		local_valid_mask=local_valid_mask,
+		valid_patch_min_fraction=valid_patch_min_fraction,
 		reconstruction=reconstruction,
 		huber_delta=huber_delta,
 		family_balanced=family_balanced,
@@ -145,6 +180,8 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		spatial_mask=spatial_mask,
 		target_valid=target_valid,
 		patch_size_xyz=patch_size_xyz,
+		local_valid_mask=local_valid_mask,
+		valid_patch_min_fraction=valid_patch_min_fraction,
 		reconstruction=reconstruction,
 		huber_delta=huber_delta,
 		family_balanced=family_balanced,
@@ -209,6 +246,63 @@ def _elementwise_loss(
 		)
 	msg = f'reconstruction must be "huber" or "mse"; got {reconstruction!r}'
 	raise ValueError(msg)
+
+
+def _local_valid_patch_mask(
+	*,
+	local_valid_mask: torch.Tensor | None,
+	pred_patches: torch.Tensor,
+	target: torch.Tensor,
+	patch_size_xyz: tuple[int, int, int],
+	valid_patch_min_fraction: float,
+) -> torch.Tensor | None:
+	if local_valid_mask is None:
+		return None
+	_validate_local_valid_mask(local_valid_mask, target)
+	_validate_same_device(pred_patches, target, local_valid_mask)
+	if not 0.0 <= valid_patch_min_fraction <= 1.0:
+		msg = (
+			'valid_patch_min_fraction must be between 0.0 and 1.0; '
+			f'got {valid_patch_min_fraction!r}'
+		)
+		raise ValueError(msg)
+	patches = patchify_3d(
+		local_valid_mask.unsqueeze(1).to(dtype=pred_patches.dtype),
+		patch_size_xyz,
+	)
+	valid_fraction = patches.squeeze(2).mean(dim=-1)
+	if valid_fraction.shape != (pred_patches.shape[0], pred_patches.shape[1]):
+		msg = (
+			'patchified local_valid_mask must match pred_patches patch grid; '
+			f'got {tuple(valid_fraction.shape)!r} and '
+			f'{(pred_patches.shape[0], pred_patches.shape[1])!r}'
+		)
+		raise ValueError(msg)
+	return valid_fraction > valid_patch_min_fraction
+
+
+def _validate_local_valid_mask(
+	local_valid_mask: torch.Tensor,
+	target: torch.Tensor,
+) -> None:
+	if local_valid_mask.dtype != torch.bool:
+		msg = (
+			'local_valid_mask must have dtype torch.bool; '
+			f'got {local_valid_mask.dtype!r}'
+		)
+		raise TypeError(msg)
+	expected_shape = (
+		target.shape[0],
+		target.shape[2],
+		target.shape[3],
+		target.shape[4],
+	)
+	if tuple(local_valid_mask.shape) != expected_shape:
+		msg = (
+			f'local_valid_mask shape must be {expected_shape!r}; '
+			f'got {tuple(local_valid_mask.shape)!r}'
+		)
+		raise ValueError(msg)
 
 
 def _weighted_mean(

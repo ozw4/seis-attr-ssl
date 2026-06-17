@@ -36,6 +36,10 @@ def _dropped_attribute_mask() -> torch.Tensor:
 	return torch.zeros((1, 3), dtype=torch.bool)
 
 
+def _local_valid_mask() -> torch.Tensor:
+	return torch.ones((1, 4, 4, 4), dtype=torch.bool)
+
+
 def test_zero_loss_when_prediction_equals_target() -> None:
 	target = _target()
 	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ).requires_grad_()
@@ -53,6 +57,121 @@ def test_zero_loss_when_prediction_equals_target() -> None:
 	assert losses['loss_reconstruction'] == torch.tensor(0.0)
 	assert losses['loss_dropped_attribute'] == torch.tensor(0.0)
 	assert losses['loss_gradient'] == torch.tensor(0.0)
+
+
+def test_all_true_local_valid_mask_matches_unmasked_loss() -> None:
+	target = torch.zeros((1, 3, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ) + 1.0
+
+	unmasked_losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=_spatial_mask(),
+		target_valid=_target_valid(),
+		dropped_attribute_mask=_dropped_attribute_mask(),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+	masked_losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=_spatial_mask(),
+		target_valid=_target_valid(),
+		dropped_attribute_mask=_dropped_attribute_mask(),
+		local_valid_mask=_local_valid_mask(),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	for key in unmasked_losses:
+		assert masked_losses[key] == unmasked_losses[key]
+
+
+def test_local_valid_mask_invalidates_all_masked_patch_loss() -> None:
+	target = torch.zeros((1, 3, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+	pred_patches[:, 0] = 10.0
+	local_valid_mask = _local_valid_mask()
+	local_valid_mask[:, :2, :2, :2] = False
+
+	losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=_spatial_mask(),
+		target_valid=_target_valid(),
+		dropped_attribute_mask=_dropped_attribute_mask(),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+		gradient_weight=0.0,
+	)
+
+	assert torch.isfinite(losses['loss'])
+	assert losses['loss_reconstruction'] == torch.tensor(0.0)
+	assert losses['loss'] == torch.tensor(0.0)
+
+
+def test_local_valid_mask_invalid_patch_removes_gradient_loss() -> None:
+	target = torch.zeros((1, 3, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+	pred_patches[:, 0] = torch.arange(8, dtype=torch.float32)
+	local_valid_mask = torch.zeros((1, 4, 4, 4), dtype=torch.bool)
+	local_valid_mask[:, 0, :2, :2] = True
+
+	losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=_spatial_mask(),
+		target_valid=_target_valid(),
+		dropped_attribute_mask=_dropped_attribute_mask(),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+	)
+
+	assert losses['loss_gradient'] == torch.tensor(0.0)
+
+
+def test_local_valid_mask_keeps_only_valid_patch_loss() -> None:
+	target = torch.zeros((1, 3, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+	spatial_mask = torch.zeros((1, 2, 2, 2), dtype=torch.bool)
+	spatial_mask[0, 0, 0, 0] = True
+	spatial_mask[0, 0, 0, 1] = True
+	pred_patches[:, 0] = 1.0
+	pred_patches[:, 1] = 3.0
+	local_valid_mask = torch.zeros((1, 4, 4, 4), dtype=torch.bool)
+	local_valid_mask[:, :2, :2, :2] = True
+
+	losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=spatial_mask,
+		target_valid=_target_valid(),
+		dropped_attribute_mask=_dropped_attribute_mask(),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+		gradient_weight=0.0,
+	)
+
+	assert losses['loss_reconstruction'] == torch.tensor(1.0)
+
+
+def test_local_valid_mask_shape_mismatch_raises() -> None:
+	target = _target()
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+
+	with pytest.raises(ValueError, match='local_valid_mask shape'):
+		mae_pretraining_loss(
+			pred_patches=pred_patches,
+			target=target,
+			spatial_mask=_spatial_mask(),
+			target_valid=_target_valid(),
+			dropped_attribute_mask=_dropped_attribute_mask(),
+			local_valid_mask=torch.ones((1, 4, 4), dtype=torch.bool),
+			patch_size_xyz=PATCH_SIZE_XYZ,
+		)
 
 
 def test_masked_spatial_patches_only_contribute_to_reconstruction_loss() -> None:
