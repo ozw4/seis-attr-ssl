@@ -19,7 +19,10 @@ from operator import index
 import numpy as np
 
 from seis_attr_ssl.attributes.registry import MVP_ATTRIBUTE_REGISTRY
-from seis_attr_ssl.attributes.zero_mask import ZeroAmplitudeMaskConfig
+from seis_attr_ssl.attributes.zero_mask import (
+	ZeroAmplitudeMaskConfig,
+	compute_zero_amplitude_invalid_mask,
+)
 from seis_attr_ssl.data.normalization import (
 	SurveyNormalizationStats,
 	load_normalization_stats,
@@ -169,7 +172,13 @@ def generate_mvp_attributes(
 	"""Generate all MVP attributes from one normalized [x, y, z] amplitude crop."""
 	cfg = config or AttributeGenerationConfig()
 	cfg.validate()
-	amplitude, voxel_valid_mask = _prepare_amplitude(amp_norm, valid_mask)
+	amplitude, base_valid_mask = _prepare_amplitude(amp_norm, valid_mask)
+	zero_invalid_mask = compute_zero_amplitude_invalid_mask(
+		amplitude,
+		valid_mask=base_valid_mask,
+		config=cfg.zero_mask,
+	)
+	voxel_valid_mask = np.logical_and(base_valid_mask, np.logical_not(zero_invalid_mask))
 
 	phase_sin, phase_cos, instantaneous_frequency = _phase_attributes(
 		amplitude,

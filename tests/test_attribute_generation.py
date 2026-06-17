@@ -18,6 +18,7 @@ from seis_attr_ssl.data import (
 	AttributeGenerationResult,
 	BaseSeismicVolumeRecord,
 	SurveyManifest,
+	ZeroAmplitudeMaskConfig,
 	center_trim_attribute_result,
 	generate_mvp_attributes,
 	generate_mvp_attributes_for_payload,
@@ -104,8 +105,11 @@ def test_generate_mvp_attributes_constant_cube_contract() -> None:
 def test_generate_mvp_attributes_ramp_along_z_is_finite() -> None:
 	z = np.linspace(-1.0, 1.0, 9, dtype=np.float32)
 	amp = np.broadcast_to(z.reshape(1, 1, -1), (4, 3, z.size)).copy()
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(enabled=False),
+	)
 
-	result = generate_mvp_attributes(amp)
+	result = generate_mvp_attributes(amp, config=config)
 
 	np.testing.assert_allclose(result.attributes[0], amp)
 	assert np.isfinite(result.attributes).all()
@@ -220,8 +224,11 @@ def test_generate_mvp_attributes_sinusoid_has_nonzero_frequency() -> None:
 	z = np.arange(z_size, dtype=np.float32)
 	trace = np.sin(2.0 * np.pi * 2.0 * z / z_size).astype(np.float32)
 	amp = np.broadcast_to(trace.reshape(1, 1, -1), (2, 3, z_size)).copy()
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(enabled=False),
+	)
 
-	result = generate_mvp_attributes(amp)
+	result = generate_mvp_attributes(amp, config=config)
 
 	assert np.isfinite(result.attributes).all()
 	assert float(result.attributes[3].mean()) > 0.0
@@ -320,6 +327,54 @@ def test_generate_mvp_attributes_zeroes_invalid_padded_voxels() -> None:
 	np.testing.assert_array_equal(result.voxel_valid_mask, valid_mask)
 	assert np.isfinite(result.attributes).all()
 	assert not result.attributes[:, ~valid_mask].any()
+
+
+def test_generate_mvp_attributes_invalidates_zero_z_plane_influence() -> None:
+	amp = np.ones((3, 4, 7), dtype=np.float32)
+	amp[:, :, 3] = 0.0
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(
+			z_sample_influence_radius=1,
+			xy_trace_influence_radius=0,
+		),
+	)
+
+	result = generate_mvp_attributes(amp, config=config)
+
+	expected = np.ones_like(amp, dtype=bool)
+	expected[:, :, 2:5] = False
+	np.testing.assert_array_equal(result.voxel_valid_mask, expected)
+	assert not result.attributes[:, ~expected].any()
+
+
+def test_generate_mvp_attributes_invalidates_zero_trace_influence() -> None:
+	amp = np.ones((5, 5, 4), dtype=np.float32)
+	amp[2, 2, :] = 0.0
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=1,
+		),
+	)
+
+	result = generate_mvp_attributes(amp, config=config)
+
+	expected = np.ones_like(amp, dtype=bool)
+	expected[1:4, 1:4, :] = False
+	np.testing.assert_array_equal(result.voxel_valid_mask, expected)
+	assert not result.attributes[:, ~expected].any()
+
+
+def test_generate_mvp_attributes_zero_mask_disabled_preserves_valid_mask() -> None:
+	amp = np.zeros((2, 3, 4), dtype=np.float32)
+	config = AttributeGenerationConfig(
+		zero_mask=ZeroAmplitudeMaskConfig(enabled=False),
+	)
+
+	result = generate_mvp_attributes(amp, config=config)
+
+	np.testing.assert_array_equal(result.voxel_valid_mask, np.ones_like(amp, dtype=bool))
+	assert result.attributes[:, result.voxel_valid_mask].any()
 
 
 def test_generate_mvp_attributes_for_payload_trims_compute_crop(monkeypatch) -> None:
