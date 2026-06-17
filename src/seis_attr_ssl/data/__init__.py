@@ -47,6 +47,14 @@ if TYPE_CHECKING:
 		normalize_amplitude,
 		write_normalization_stats,
 	)
+	from seis_attr_ssl.data.normalization_qc import (
+		NormalizationStatsQcItem,
+		NormalizationStatsQcReport,
+		NormalizationStatsQcThresholds,
+		evaluate_normalization_stats,
+		evaluate_normalization_stats_file,
+		normalization_qc_report_to_dict,
+	)
 	from seis_attr_ssl.data.path_list import (
 		load_npy_path_list,
 		make_survey_id_from_path,
@@ -86,6 +94,9 @@ __all__ = [
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'NopimsAttributePretrainDataset',
+	'NormalizationStatsQcItem',
+	'NormalizationStatsQcReport',
+	'NormalizationStatsQcThresholds',
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
 	'SurveyManifest',
@@ -100,6 +111,8 @@ __all__ = [
 	'compute_normalization_stats',
 	'downsample_context_masked_mean',
 	'downsample_context_mean',
+	'evaluate_normalization_stats',
+	'evaluate_normalization_stats_file',
 	'generate_mvp_attributes',
 	'generate_mvp_attributes_for_payload',
 	'inspect_npy_volume',
@@ -107,6 +120,7 @@ __all__ = [
 	'load_npy_path_list',
 	'make_context_request',
 	'make_survey_id_from_path',
+	'normalization_qc_report_to_dict',
 	'normalize_amplitude',
 	'normalize_downsample_xyz',
 	'read_manifest_json',
@@ -175,6 +189,15 @@ _NORMALIZATION_EXPORTS = {
 	'write_normalization_stats',
 }
 
+_NORMALIZATION_QC_EXPORTS = {
+	'NormalizationStatsQcItem',
+	'NormalizationStatsQcReport',
+	'NormalizationStatsQcThresholds',
+	'evaluate_normalization_stats',
+	'evaluate_normalization_stats_file',
+	'normalization_qc_report_to_dict',
+}
+
 _PATH_LIST_EXPORTS = {
 	'load_npy_path_list',
 	'make_survey_id_from_path',
@@ -212,6 +235,10 @@ _EXPORT_MODULES = {
 	**dict.fromkeys(_ATTRIBUTE_SUBSET_EXPORTS, 'seis_attr_ssl.data.attribute_subset'),
 	**dict.fromkeys(_DOWNSAMPLE_EXPORTS, 'seis_attr_ssl.data.downsample'),
 	**dict.fromkeys(_NORMALIZATION_EXPORTS, 'seis_attr_ssl.data.normalization'),
+	**dict.fromkeys(
+		_NORMALIZATION_QC_EXPORTS,
+		'seis_attr_ssl.data.normalization_qc',
+	),
 	**dict.fromkeys(_PATH_LIST_EXPORTS, 'seis_attr_ssl.data.path_list'),
 	**dict.fromkeys(_PRETRAIN_DATASET_EXPORTS, 'seis_attr_ssl.data.pretrain_dataset'),
 	**dict.fromkeys(_SCHEMA_EXPORTS, 'seis_attr_ssl.data.schema'),
