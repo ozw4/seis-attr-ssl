@@ -163,8 +163,7 @@ def _save_xy_png(  # noqa: PLR0913
 	_plot_panels(
 		panels,
 		title=(
-			'XY slice on-the-fly attributes '
-			f'(z={z_idx}, z_window={z_stop - z_start})'
+			f'XY slice on-the-fly attributes (z={z_idx}, z_window={z_stop - z_start})'
 		),
 		out_path=out_path,
 		xlabel='x',
@@ -218,8 +217,7 @@ def _save_xz_png(  # noqa: PLR0913
 	_plot_panels(
 		panels,
 		title=(
-			'XZ slice on-the-fly attributes '
-			f'(y={y_idx}, y_window={y_stop - y_start})'
+			f'XZ slice on-the-fly attributes (y={y_idx}, y_window={y_stop - y_start})'
 		),
 		out_path=out_path,
 		xlabel='x',

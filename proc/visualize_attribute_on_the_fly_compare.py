@@ -68,8 +68,7 @@ def main() -> None:
 			xy_z_window=int(vis_cfg.get('xy_z_window', 256)),
 			xz_y_window=int(vis_cfg.get('xz_y_window', 64)),
 			clip_percentiles=tuple(
-				float(value)
-				for value in vis_cfg.get('clip_percentiles', (1.0, 99.0))
+				float(value) for value in vis_cfg.get('clip_percentiles', (1.0, 99.0))
 			),  # type: ignore[arg-type]
 			show_raw_amplitude=bool(vis_cfg.get('show_raw_amplitude', True)),
 			use_known_ranges=bool(vis_cfg.get('use_known_ranges', True)),
