@@ -345,6 +345,9 @@ def test_invalid_masking_attribute_bounds_raise_clear_value_error() -> None:
 	[
 		('samples_per_epoch', 0, ValueError, 'train\\.samples_per_epoch'),
 		('samples_per_epoch', True, TypeError, 'train\\.samples_per_epoch'),
+		('checkpoint_every_steps', 0, ValueError, 'train\\.checkpoint_every_steps'),
+		('checkpoint_every_steps', -1, ValueError, 'train\\.checkpoint_every_steps'),
+		('checkpoint_every_steps', False, TypeError, 'train\\.checkpoint_every_steps'),
 		('num_workers', -1, ValueError, 'train\\.num_workers'),
 		('num_workers', False, TypeError, 'train\\.num_workers'),
 		('shuffle', 'true', TypeError, 'train\\.shuffle'),
@@ -366,6 +369,13 @@ def test_invalid_train_runtime_fields_raise_clear_error(
 
 	with pytest.raises(error_type, match=match):
 		validate_config(cfg)
+
+
+def test_null_checkpoint_every_steps_is_allowed() -> None:
+	cfg = _valid_config()
+	cfg['train']['checkpoint_every_steps'] = None
+
+	validate_config(cfg)
 
 
 @pytest.mark.parametrize(
