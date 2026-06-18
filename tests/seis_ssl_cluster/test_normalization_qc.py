@@ -41,7 +41,7 @@ def test_evaluate_normalization_stats_excludes_small_iqr_by_default() -> None:
 	assert item.exclude_reasons == ('small_iqr',)
 
 
-def test_evaluate_stats_file_reports_missing_source_before_stats(
+def test_evaluate_stats_file_reports_missing_source_and_missing_stats(
 	tmp_path: Path,
 ) -> None:
 	item = evaluate_normalization_stats_file(
@@ -52,7 +52,7 @@ def test_evaluate_stats_file_reports_missing_source_before_stats(
 	)
 
 	assert item.status == 'exclude'
-	assert item.exclude_reasons == ('missing_source',)
+	assert item.exclude_reasons == ('missing_source', 'missing_stats')
 
 
 def test_evaluate_stats_file_reports_source_mismatch(tmp_path: Path) -> None:

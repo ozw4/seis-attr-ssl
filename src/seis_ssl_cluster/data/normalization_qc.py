@@ -107,22 +107,27 @@ def evaluate_normalization_stats_file(
 	resolved_source_path = None if source_path is None else Path(source_path)
 	fallback_survey_id = survey_id or _survey_id_from_stats_path(path)
 
-	if resolved_source_path is not None and not resolved_source_path.is_file():
+	missing_source = (
+		resolved_source_path is not None and not resolved_source_path.is_file()
+	)
+	missing_stats = not path.exists()
+	if missing_source or missing_stats:
+		reasons = []
+		errors = []
+		if missing_source:
+			reasons.append('missing_source')
+			errors.append(
+				f'source amplitude file does not exist: {resolved_source_path}',
+			)
+		if missing_stats:
+			reasons.append('missing_stats')
+			errors.append(f'normalization stats file does not exist: {path}')
 		return _excluded_item(
 			survey_id=fallback_survey_id,
 			stats_path=path,
 			source_path=resolved_source_path,
-			exclude_reasons=('missing_source',),
-			error=f'source amplitude file does not exist: {resolved_source_path}',
-		)
-
-	if not path.exists():
-		return _excluded_item(
-			survey_id=fallback_survey_id,
-			stats_path=path,
-			source_path=resolved_source_path,
-			exclude_reasons=('missing_stats',),
-			error=f'normalization stats file does not exist: {path}',
+			exclude_reasons=tuple(reasons),
+			error='; '.join(errors),
 		)
 
 	try:

@@ -68,21 +68,18 @@ def filter_manifests_by_stats_qc(
 	excluded = frozenset(
 		item.survey_id for item in report.items if item.status == 'exclude'
 	)
-	path_survey_id_set = set(path_survey_ids)
+	clean_path_pairs = tuple(
+		(entry, survey_id)
+		for entry, survey_id in zip(path_entries, path_survey_ids, strict=True)
+		if survey_id not in excluded
+	)
 	return FilteredManifestStatsQcResult(
 		report=report,
 		excluded_surveys=tuple(sorted(excluded)),
 		clean_manifests=tuple(
-			manifest
-			for manifest in manifests
-			if manifest.survey_id in path_survey_id_set
-			and manifest.survey_id not in excluded
+			manifest_by_survey[survey_id] for _, survey_id in clean_path_pairs
 		),
-		clean_path_entries=tuple(
-			entry
-			for entry, survey_id in zip(path_entries, path_survey_ids, strict=True)
-			if survey_id not in excluded
-		),
+		clean_path_entries=tuple(entry for entry, _ in clean_path_pairs),
 	)
 
 

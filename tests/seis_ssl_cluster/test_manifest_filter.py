@@ -7,10 +7,17 @@ import numpy as np
 import yaml
 
 from seis_ssl_cluster.data import (
+	GRID_ORDER_XYZ,
+	AmplitudeVolumeRecord,
+	NormalizationStatsQcThresholds,
+	SurveyManifest,
+	SurveyNormalizationStats,
+	filter_manifests_by_stats_qc,
 	make_survey_id_from_path,
 	read_manifest_json,
 	scan_nopims_amplitude_manifests_from_path_list,
 	write_manifest_json,
+	write_normalization_stats,
 )
 from tests.helpers import run_python_proc
 
@@ -157,10 +164,88 @@ def test_synthetic_normalization_qc_integration_writes_clean_outputs(
 	]
 
 
+def test_filter_manifests_by_stats_qc_preserves_clean_split_order_and_duplicates(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	first = _write_volume(
+		nopims_root / 'first' / 'base.npy',
+		np.arange(8, dtype=np.float32).reshape((2, 2, 2)),
+	)
+	second = _write_volume(
+		nopims_root / 'second' / 'base.npy',
+		np.arange(8, dtype=np.float32).reshape((2, 2, 2)),
+	)
+	stats_dir = tmp_path / 'stats'
+	first_id = make_survey_id_from_path(first, nopims_root)
+	second_id = make_survey_id_from_path(second, nopims_root)
+	first_manifest = _manifest(nopims_root, first, first_id, stats_dir)
+	second_manifest = _manifest(nopims_root, second, second_id, stats_dir)
+	_write_stats(first_manifest)
+	_write_stats(second_manifest)
+
+	result = filter_manifests_by_stats_qc(
+		(second_manifest, first_manifest),
+		('first/base.npy', 'first/base.npy', 'second/base.npy'),
+		nopims_root=nopims_root,
+		thresholds=NormalizationStatsQcThresholds(),
+	)
+
+	assert result.clean_path_entries == (
+		'first/base.npy',
+		'first/base.npy',
+		'second/base.npy',
+	)
+	assert [manifest.survey_id for manifest in result.clean_manifests] == [
+		first_id,
+		first_id,
+		second_id,
+	]
+
+
 def _write_volume(path: Path, values: np.ndarray) -> Path:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	np.save(path, values)
 	return path
+
+
+def _manifest(
+	nopims_root: Path,
+	volume_path: Path,
+	survey_id: str,
+	stats_dir: Path,
+) -> SurveyManifest:
+	return SurveyManifest(
+		survey_id=survey_id,
+		root=nopims_root,
+		amplitude=AmplitudeVolumeRecord(
+			survey_id=survey_id,
+			path=volume_path,
+			shape_xyz=(2, 2, 2),
+			dtype='float32',
+			grid_order=GRID_ORDER_XYZ,
+			normalization_stats_path=(
+				stats_dir / f'{survey_id}.normalization_stats.json'
+			),
+		),
+	)
+
+
+def _write_stats(manifest: SurveyManifest) -> None:
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id=manifest.survey_id,
+			source_path=manifest.amplitude.path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.5,
+			clip_high_percentile=99.5,
+			clip_low=-2.0,
+			clip_high=6.0,
+			median=2.0,
+			iqr=2.0,
+		),
+		manifest.amplitude.normalization_stats_path,
+	)
 
 
 def _base_config(stage: str, nopims_root: Path) -> dict[str, object]:
