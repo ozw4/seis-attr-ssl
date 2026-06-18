@@ -3,10 +3,16 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
-  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amp_manifests.json
-  output: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amp_manifests_qc.json
-normalization_qc:
-  stats_dir: /workspace/artifacts/seis_ssl_cluster/registry/normalization/nopims/pretrain_v1
+  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
+  output: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+splits:
+  input: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/train_npy_paths.txt
+  output: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
+qc:
+  output_json: /workspace/artifacts/seis_ssl_cluster/registry/qc/nopims/pretrain_v1/normalization_stats_qc.json
+  excluded_surveys: /workspace/artifacts/seis_ssl_cluster/registry/qc/nopims/pretrain_v1/excluded_surveys.txt
+  min_iqr: 0.0001
+  max_normalized_abs: 1000000.0
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap

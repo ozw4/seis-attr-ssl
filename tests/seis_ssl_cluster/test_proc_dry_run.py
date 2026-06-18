@@ -39,6 +39,14 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	assert 'data.use_context: false' in result.stdout
 	if script_path == Path('proc/seis_ssl_cluster/build_nopims_manifests.py'):
 		assert 'manifest scan: skipped' in result.stdout
+	elif script_path == Path(
+		'proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py',
+	):
+		assert 'normalization_stats.compute: skipped' in result.stdout
+	elif script_path == Path(
+		'proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py',
+	):
+		assert 'normalization_qc.compute: skipped' in result.stdout
 	else:
 		assert 'execution: dry-run; implementation pending' in result.stdout
 

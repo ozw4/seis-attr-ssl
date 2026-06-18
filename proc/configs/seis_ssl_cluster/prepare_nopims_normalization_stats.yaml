@@ -3,9 +3,15 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
-  train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amp_manifests.json
+  train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
 normalization:
-  stats_output_dir: /workspace/artifacts/seis_ssl_cluster/registry/normalization/nopims/pretrain_v1
+  clipping_percentiles: [0.5, 99.5]
+  epsilon: 1.0e-6
+  max_samples: 1000000
+  seed: 42
+  smooth_time_depth_trend_correction: false
+  trace_wise_agc: false
+  patch_wise_zscore: false
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap

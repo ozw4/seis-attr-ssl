@@ -3,7 +3,7 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
-  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amp_manifests_qc.json
+  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
 embeddings:
   checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/train_amp_mae/checkpoints/best.pt
   output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
