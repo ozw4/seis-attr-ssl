@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
+import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -17,9 +18,6 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
@@ -127,46 +125,151 @@ def test_embedding_extraction_rejects_complete_output_metadata_mismatch(
 		run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 
+def test_embedding_extraction_hashes_checkpoint_once_for_multiple_surveys(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path, survey_count=2)
+	hash_calls: list[Path] = []
+
+	def fake_file_sha256(path: str | Path) -> str:
+		hash_calls.append(Path(path))
+		return 'cached-checkpoint-digest'
+
+	monkeypatch.setattr(extractor_module, 'file_sha256', fake_file_sha256)
+
+	results = run_embedding_extraction(config, device='cpu')
+
+	assert [result.survey_id for result in results] == ['survey-a', 'survey-b']
+	assert hash_calls == [Path(config['embeddings']['checkpoint'])]
+	for result in results:
+		metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+		assert metadata['checkpoint_sha256'] == 'cached-checkpoint-digest'
+
+
+def test_embedding_extraction_uses_checkpoint_zero_mask_settings(
+	tmp_path: Path,
+) -> None:
+	zero_mask = {
+		'enabled': True,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 0,
+		'xy_trace_influence_radius': 1,
+	}
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_zero_mask=zero_mask,
+		include_extraction_zero_mask=False,
+	)
+	config['embedding']['min_token_valid_fraction'] = 1.0
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['zero_mask'] == zero_mask
+	valid_tokens = np.load(result.valid_tokens_path)
+	assert not valid_tokens[0, 0, :].any()
+	assert valid_tokens[1, 1, 1]
+
+
+def test_embedding_extraction_rejects_conflicting_zero_mask_override(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_zero_mask={
+			'enabled': True,
+			'zero_atol': 0.0,
+			'z_sample_influence_radius': 0,
+			'xy_trace_influence_radius': 1,
+		},
+	)
+	config['zero_mask'] = {'enabled': False}
+
+	with pytest.raises(ValueError, match='zero_mask override must match checkpoint'):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_rejects_integer_output_dtype(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['output_dtype'] = 'int16'
+
+	with pytest.raises(TypeError, match='floating-point NumPy dtype'):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_metadata_records_full_model_geometry(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['model_geometry'] == {
+		'name': 'amp_mae3d',
+		'in_channels': 1,
+		'out_channels': 1,
+		'patch_size': [2, 2, 2],
+		'encoder_dim': 12,
+		'encoder_depth': 1,
+		'encoder_heads': 3,
+		'decoder_dim': 12,
+		'decoder_depth': 1,
+		'decoder_heads': 3,
+	}
+
+
 def _write_fixture(
 	tmp_path: Path,
 	*,
 	checkpoint_dtype: torch.dtype = torch.float32,
+	checkpoint_zero_mask: dict[str, object] | None = None,
+	include_extraction_zero_mask: bool = True,
+	survey_count: int = 1,
 ) -> dict[str, object]:
-	survey_root = tmp_path / 'survey-a'
-	survey_root.mkdir()
-	volume_path = survey_root / 'amplitude.npy'
-	volume = np.arange(5 * 6 * 7, dtype=np.float32).reshape(5, 6, 7)
-	volume[0, 0, :] = 0.0
-	np.save(volume_path, volume)
-	stats_path = survey_root / 'stats.json'
-	write_normalization_stats(
-		SurveyNormalizationStats(
-			survey_id='survey-a',
-			source_path=volume_path,
-			grid_order=GRID_ORDER_XYZ,
-			clip_low_percentile=0.0,
-			clip_high_percentile=100.0,
-			clip_low=-1000.0,
-			clip_high=1000.0,
-			median=0.0,
-			iqr=100.0,
-		),
-		stats_path,
-	)
-	manifest = SurveyManifest(
-		survey_id='survey-a',
-		root=survey_root,
-		amplitude=AmplitudeVolumeRecord(
-			survey_id='survey-a',
-			path=volume_path,
-			shape_xyz=tuple(int(axis) for axis in volume.shape),
-			dtype='float32',
-			grid_order=GRID_ORDER_XYZ,
-			normalization_stats_path=stats_path,
-		),
-	)
+	if checkpoint_zero_mask is None:
+		checkpoint_zero_mask = {'enabled': False}
+	manifests = []
+	for survey_index in range(survey_count):
+		survey_id = f'survey-{chr(ord("a") + survey_index)}'
+		survey_root = tmp_path / survey_id
+		survey_root.mkdir()
+		volume_path = survey_root / 'amplitude.npy'
+		volume = np.arange(5 * 6 * 7, dtype=np.float32).reshape(5, 6, 7)
+		volume[0, 0, :] = 0.0
+		np.save(volume_path, volume)
+		stats_path = survey_root / 'stats.json'
+		write_normalization_stats(
+			SurveyNormalizationStats(
+				survey_id=survey_id,
+				source_path=volume_path,
+				grid_order=GRID_ORDER_XYZ,
+				clip_low_percentile=0.0,
+				clip_high_percentile=100.0,
+				clip_low=-1000.0,
+				clip_high=1000.0,
+				median=0.0,
+				iqr=100.0,
+			),
+			stats_path,
+		)
+		manifests.append(
+			SurveyManifest(
+				survey_id=survey_id,
+				root=survey_root,
+				amplitude=AmplitudeVolumeRecord(
+					survey_id=survey_id,
+					path=volume_path,
+					shape_xyz=tuple(int(axis) for axis in volume.shape),
+					dtype='float32',
+					grid_order=GRID_ORDER_XYZ,
+					normalization_stats_path=stats_path,
+				),
+			),
+		)
 	manifest_path = tmp_path / 'manifest.json'
-	write_manifest_json([manifest], manifest_path)
+	write_manifest_json(manifests, manifest_path)
 	checkpoint_path = tmp_path / 'mae.pt'
 	model_config = {
 		'name': 'amp_mae3d',
@@ -196,11 +299,15 @@ def _write_fixture(
 	torch.save(
 		{
 			'model_state_dict': model.state_dict(),
-			'config': {'stage': 'train_amp_mae', 'model': model_config},
+			'config': {
+				'stage': 'train_amp_mae',
+				'model': model_config,
+				'zero_mask': checkpoint_zero_mask,
+			},
 		},
 		checkpoint_path,
 	)
-	return {
+	config: dict[str, object] = {
 		'stage': 'extract_embeddings',
 		'paths': {
 			'nopims_root': str(tmp_path),
@@ -232,7 +339,6 @@ def _write_fixture(
 			'spatial_mask_mode': 'block',
 			'block_size_tokens': [1, 1, 1],
 		},
-		'zero_mask': {'enabled': False},
 		'train': {
 			'batch_size': 1,
 			'samples_per_epoch': 1,
@@ -241,3 +347,6 @@ def _write_fixture(
 			'device': 'cpu',
 		},
 	}
+	if include_extraction_zero_mask:
+		config['zero_mask'] = dict(checkpoint_zero_mask)
+	return config

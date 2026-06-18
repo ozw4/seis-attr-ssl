@@ -14,9 +14,12 @@ from seis_ssl_cluster.data import (
 	ZeroMaskConfig,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.training.dataloaders import build_mae_dataloader
 
 if TYPE_CHECKING:
 	from pathlib import Path
+
+	import torch
 
 
 def _write_volume(path: Path, volume: np.ndarray) -> Path:
@@ -179,6 +182,41 @@ def test_amplitude_dataset_set_epoch_changes_coords_deterministically(
 	assert epoch_zero != epoch_one
 
 
+def test_amplitude_dataset_persistent_worker_reads_shared_epoch(
+	tmp_path: Path,
+) -> None:
+	dataset = NopimsAmplitudePretrainDataset(
+		[_manifest(tmp_path, 'survey', np.ones((20, 20, 20), dtype=np.float32))],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		seed=17,
+		samples_per_epoch=1,
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+	dataloader = build_mae_dataloader(
+		dataset,
+		batch_size=1,
+		num_workers=1,
+		shuffle=False,
+		seed=17,
+		device='cpu',
+	)
+	assert dataloader.persistent_workers is True
+
+	try:
+		dataset.set_epoch(0)
+		epoch_zero = _first_local_start_xyz(dataloader)
+		dataset.set_epoch(1)
+		epoch_one = _first_local_start_xyz(dataloader)
+		dataset.set_epoch(0)
+		epoch_zero_again = _first_local_start_xyz(dataloader)
+	finally:
+		_shutdown_persistent_workers(dataloader)
+
+	assert epoch_zero == epoch_zero_again
+	assert epoch_zero != epoch_one
+
+
 def test_amplitude_dataset_rejects_manifest_smaller_than_crop(tmp_path: Path) -> None:
 	manifest = _manifest(tmp_path, 'small', np.ones((3, 4, 5), dtype=np.float32))
 
@@ -260,3 +298,23 @@ def test_amplitude_dataset_from_config_uses_masking_settings(tmp_path: Path) -> 
 	assert len(dataset) == 3
 	assert sample['spatial_mask'].shape == (2, 2, 2)
 	assert float(sample['spatial_mask'].mean()) == 0.5
+
+
+def _first_local_start_xyz(
+	dataloader: torch.utils.data.DataLoader,
+) -> tuple[int, int, int]:
+	batch = next(iter(dataloader))
+	coords = batch['coords']
+	if isinstance(coords, list):
+		return tuple(int(axis) for axis in coords[0]['local_start_xyz'])
+
+	local_start_xyz = coords['local_start_xyz']
+	if hasattr(local_start_xyz, 'tolist'):
+		return tuple(int(axis) for axis in local_start_xyz[0].tolist())
+	return tuple(int(axis[0]) for axis in local_start_xyz)
+
+
+def _shutdown_persistent_workers(dataloader: torch.utils.data.DataLoader) -> None:
+	iterator = getattr(dataloader, '_iterator', None)
+	if iterator is not None:
+		iterator._shutdown_workers()  # noqa: SLF001

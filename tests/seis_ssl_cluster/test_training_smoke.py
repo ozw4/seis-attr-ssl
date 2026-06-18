@@ -184,6 +184,29 @@ def test_shuffle_epoch_resume_matches_uninterrupted_training_stream(
 	)
 
 
+def test_persistent_worker_epoch_resume_matches_uninterrupted_training_stream(
+	tmp_path: Path,
+) -> None:
+	full_cfg = _tiny_config(tmp_path / 'full')
+	full_cfg['train']['num_workers'] = 1
+	full_cfg['train']['samples_per_epoch'] = 2
+	full_cfg['train']['epochs'] = 2
+
+	resume_cfg = _tiny_config(tmp_path / 'resume')
+	resume_cfg['train']['num_workers'] = 1
+	resume_cfg['train']['samples_per_epoch'] = 2
+
+	full_checkpoint = run_mae_pretraining(full_cfg)
+	epoch_checkpoint = run_mae_pretraining(resume_cfg)
+	resume_cfg['train']['epochs'] = 2
+	resumed_checkpoint = run_mae_pretraining(resume_cfg, resume=epoch_checkpoint)
+
+	_assert_model_states_equal(
+		load_checkpoint(full_checkpoint, map_location='cpu')['model_state_dict'],
+		load_checkpoint(resumed_checkpoint, map_location='cpu')['model_state_dict'],
+	)
+
+
 def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	checkpoint_path = run_mae_pretraining(cfg)

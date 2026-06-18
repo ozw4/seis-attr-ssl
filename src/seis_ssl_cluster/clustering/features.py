@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -30,6 +31,17 @@ class FeatureBatch:
 	survey_id: str
 	token_indices: np.ndarray
 	features: np.ndarray
+
+
+COMPATIBILITY_METADATA_FIELDS = (
+	'checkpoint_sha256',
+	'model_geometry',
+	'patch_size',
+	'window_size',
+	'overlap',
+	'min_token_valid_fraction',
+	'zero_mask',
+)
 
 
 def discover_embedding_inputs(input_dir: str | Path) -> list[EmbeddingInput]:
@@ -131,7 +143,9 @@ def extract_token_features(
 		raise ValueError(msg)
 	if indices.size == 0:
 		return np.empty((0, embeddings.shape[-1]), dtype=np.float32)
-	return np.asarray(flat[indices], dtype=np.float32)
+	features = np.asarray(flat[indices], dtype=np.float32)
+	_validate_finite_features(features, embedding_input.survey_id)
+	return features
 
 
 def iter_valid_feature_batches(
@@ -173,6 +187,83 @@ def embedding_input_metadata(embedding_input: EmbeddingInput) -> dict[str, objec
 	}
 
 
+def load_embedding_metadata(embedding_input: EmbeddingInput) -> dict[str, object]:
+	"""Load one survey's extraction metadata JSON."""
+	try:
+		payload = json.loads(embedding_input.metadata_path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		msg = (
+			f'embedding metadata must be valid JSON for '
+			f'{embedding_input.survey_id}: {embedding_input.metadata_path}'
+		)
+		raise ValueError(msg) from exc
+	if not isinstance(payload, dict):
+		msg = (
+			f'embedding metadata must be a JSON object for '
+			f'{embedding_input.survey_id}: {embedding_input.metadata_path}'
+		)
+		raise TypeError(msg)
+	return payload
+
+
+def embedding_compatibility_signature(
+	embedding_input: EmbeddingInput,
+) -> dict[str, object]:
+	"""Return representation-defining metadata for clustering compatibility."""
+	metadata = load_embedding_metadata(embedding_input)
+	missing = [
+		field
+		for field in COMPATIBILITY_METADATA_FIELDS
+		if field not in metadata
+	]
+	if missing:
+		msg = (
+			f'embedding metadata missing compatibility fields for '
+			f'{embedding_input.survey_id}: {missing!r}'
+		)
+		raise ValueError(msg)
+	return {
+		**{
+			field: metadata[field]
+			for field in COMPATIBILITY_METADATA_FIELDS
+		},
+		'embedding_dim': embedding_dim(embedding_input),
+	}
+
+
+def validate_compatible_embedding_inputs(
+	embedding_inputs: Sequence[EmbeddingInput],
+) -> dict[str, object]:
+	"""Require all survey embeddings to share one representation signature."""
+	if not embedding_inputs:
+		msg = 'at least one embedding input is required'
+		raise ValueError(msg)
+	signatures = [
+		(item, embedding_compatibility_signature(item))
+		for item in embedding_inputs
+	]
+	baseline_input, baseline = signatures[0]
+	for item, signature in signatures[1:]:
+		if signature != baseline:
+			differing = [
+				field
+				for field, value in baseline.items()
+				if signature.get(field) != value
+			]
+			msg = (
+				'incompatible embedding artifacts for surveys '
+				f'{baseline_input.survey_id!r} and {item.survey_id!r}; '
+				f'differing fields: {", ".join(differing)}'
+			)
+			raise ValueError(msg)
+	return baseline
+
+
+def validate_finite_feature_batch(features: np.ndarray, survey_id: str) -> None:
+	"""Raise when a feature batch contains NaN or infinity values."""
+	_validate_finite_features(features, survey_id)
+
+
 def _validate_embedding_input(embedding_input: EmbeddingInput) -> None:
 	missing = [
 		path
@@ -191,17 +282,28 @@ def _validate_embedding_input(embedding_input: EmbeddingInput) -> None:
 		raise FileNotFoundError(msg)
 
 
+def _validate_finite_features(features: np.ndarray, survey_id: str) -> None:
+	if not np.isfinite(features).all():
+		msg = f'non-finite embedding features found for survey {survey_id}'
+		raise ValueError(msg)
+
+
 __all__ = [
+	'COMPATIBILITY_METADATA_FIELDS',
 	'EmbeddingInput',
 	'FeatureBatch',
 	'count_valid_tokens',
 	'discover_embedding_inputs',
+	'embedding_compatibility_signature',
 	'embedding_dim',
 	'embedding_input_metadata',
 	'extract_token_features',
 	'file_sha256',
 	'iter_valid_feature_batches',
+	'load_embedding_metadata',
 	'load_valid_tokens',
 	'open_embedding_array',
 	'valid_flat_indices',
+	'validate_compatible_embedding_inputs',
+	'validate_finite_feature_batch',
 ]
