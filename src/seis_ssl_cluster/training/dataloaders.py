@@ -1,10 +1,10 @@
-"""DataLoader builders for MAE pretraining."""
+"""DataLoader builders for amplitude MAE pretraining."""
 
 from __future__ import annotations
 
 import torch
 
-from seis_attr_ssl.training.collate import mae_collate_fn
+from seis_ssl_cluster.training.collate import mae_collate_fn
 
 
 def build_mae_dataloader(
@@ -15,7 +15,7 @@ def build_mae_dataloader(
 	shuffle: bool = True,
 	seed: int = 42,
 ) -> torch.utils.data.DataLoader:
-	"""Build a deterministic MAE DataLoader with the project collate function."""
+	"""Build a deterministic amplitude MAE DataLoader."""
 	generator = torch.Generator()
 	generator.manual_seed(seed)
 	return torch.utils.data.DataLoader(

@@ -7,6 +7,7 @@ from numbers import Integral, Real
 from typing import TYPE_CHECKING, cast
 
 import numpy as np
+import torch
 
 from seis_attr_ssl.attributes import MVP_ATTRIBUTE_REGISTRY, AttributeRegistry
 from seis_attr_ssl.attributes.on_the_fly import (
@@ -155,7 +156,8 @@ class NopimsAttributePretrainDataset:
 		self.attribute_generation_config.validate()
 
 		self.seed = _validate_nonnegative_int(seed, 'seed')
-		self.epoch = 0
+		self._epoch_state = torch.zeros((), dtype=torch.int64)
+		self._epoch_state.share_memory_()
 		if samples_per_epoch is None:
 			self.samples_per_epoch = len(self.manifests)
 		else:
@@ -230,9 +232,14 @@ class NopimsAttributePretrainDataset:
 		"""Return configured epoch length."""
 		return self.samples_per_epoch
 
+	@property
+	def epoch(self) -> int:
+		"""Return the current sampling epoch from shared worker-visible state."""
+		return int(self._epoch_state.item())
+
 	def set_epoch(self, epoch: int) -> None:
 		"""Set the sampling epoch used to seed deterministic sample draws."""
-		self.epoch = _validate_nonnegative_int(epoch, 'epoch')
+		self._epoch_state.fill_(_validate_nonnegative_int(epoch, 'epoch'))
 
 	def __getitem__(self, index: int) -> dict[str, object]:
 		"""Return one MVP-compatible sample dictionary."""

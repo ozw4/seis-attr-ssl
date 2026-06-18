@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import torch
 
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -179,6 +180,48 @@ def test_amplitude_dataset_set_epoch_changes_coords_deterministically(
 	assert epoch_zero != epoch_one
 
 
+def test_amplitude_dataset_set_epoch_updates_persistent_workers(
+	tmp_path: Path,
+) -> None:
+	dataset = NopimsAmplitudePretrainDataset(
+		[_manifest(tmp_path, 'survey', np.ones((20, 20, 20), dtype=np.float32))],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		seed=17,
+		samples_per_epoch=1,
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+	dataloader = torch.utils.data.DataLoader(
+		dataset,
+		batch_size=1,
+		num_workers=1,
+		persistent_workers=True,
+		shuffle=False,
+	)
+
+	dataset.set_epoch(0)
+	epoch_zero = _single_batch(dataloader)
+	dataset.set_epoch(1)
+	epoch_one = _single_batch(dataloader)
+	dataset.set_epoch(0)
+	epoch_zero_again = _single_batch(dataloader)
+
+	epoch_zero_start = _batch_local_start_xyz(epoch_zero)
+	epoch_one_start = _batch_local_start_xyz(epoch_one)
+	epoch_zero_again_start = _batch_local_start_xyz(epoch_zero_again)
+	epoch_zero_mask = epoch_zero['spatial_mask'][0].numpy()
+	epoch_one_mask = epoch_one['spatial_mask'][0].numpy()
+	epoch_zero_again_mask = epoch_zero_again['spatial_mask'][0].numpy()
+
+	changed = (
+		epoch_zero_start != epoch_one_start
+		or not np.array_equal(epoch_zero_mask, epoch_one_mask)
+	)
+	assert changed
+	assert epoch_zero_start == epoch_zero_again_start
+	np.testing.assert_array_equal(epoch_zero_mask, epoch_zero_again_mask)
+
+
 def test_amplitude_dataset_rejects_manifest_smaller_than_crop(tmp_path: Path) -> None:
 	manifest = _manifest(tmp_path, 'small', np.ones((3, 4, 5), dtype=np.float32))
 
@@ -260,3 +303,19 @@ def test_amplitude_dataset_from_config_uses_masking_settings(tmp_path: Path) -> 
 	assert len(dataset) == 3
 	assert sample['spatial_mask'].shape == (2, 2, 2)
 	assert float(sample['spatial_mask'].mean()) == 0.5
+
+
+def _single_batch(
+	dataloader: torch.utils.data.DataLoader,
+) -> dict[str, object]:
+	batches = list(dataloader)
+	assert len(batches) == 1
+	return batches[0]
+
+
+def _batch_local_start_xyz(batch: dict[str, object]) -> tuple[int, int, int]:
+	coords = batch['coords']
+	assert isinstance(coords, dict)
+	start_xyz = coords['local_start_xyz']
+	assert isinstance(start_xyz, list)
+	return tuple(int(axis[0]) for axis in start_xyz)
