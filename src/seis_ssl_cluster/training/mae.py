@@ -18,6 +18,7 @@ import seis_ssl_cluster
 from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+from seis_ssl_cluster.models.mae.patching import unpatchify_3d
 from seis_ssl_cluster.training.checkpoint import (
 	capture_rng_state,
 	load_checkpoint,
@@ -153,6 +154,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				losses=losses,
 				amp_enabled=amp_enabled,
 				diagnostics_dir=diagnostics_dir,
+				patch_size_xyz=patch_size_xyz,
 			)
 
 		current_grad_norm: float | None = None
@@ -174,6 +176,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					losses=losses,
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
+					patch_size_xyz=patch_size_xyz,
 				)
 				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			scaler.step(optimizer)
@@ -192,6 +195,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					losses=losses,
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
+					patch_size_xyz=patch_size_xyz,
 				)
 				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			optimizer.step()
@@ -963,6 +967,7 @@ def _clip_and_check_gradients(  # noqa: PLR0913
 	losses: Mapping[str, torch.Tensor],
 	amp_enabled: bool,
 	diagnostics_dir: Path | None,
+	patch_size_xyz: tuple[int, int, int],
 ) -> float:
 	grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
 	if torch.isfinite(grad_norm.detach()).all():
@@ -977,6 +982,7 @@ def _clip_and_check_gradients(  # noqa: PLR0913
 		losses=losses,
 		amp_enabled=amp_enabled,
 		diagnostics_dir=diagnostics_dir,
+		patch_size_xyz=patch_size_xyz,
 		grad_norm=grad_norm,
 	)
 	raise AssertionError('unreachable after non-finite gradient diagnostic')
@@ -993,6 +999,7 @@ def _raise_nonfinite(  # noqa: PLR0913
 	losses: Mapping[str, torch.Tensor],
 	amp_enabled: bool,
 	diagnostics_dir: Path | None,
+	patch_size_xyz: tuple[int, int, int],
 	grad_norm: torch.Tensor | None = None,
 ) -> None:
 	if diagnostics_dir is not None:
@@ -1005,6 +1012,7 @@ def _raise_nonfinite(  # noqa: PLR0913
 				output=output,
 				losses=losses,
 				amp_enabled=amp_enabled,
+				patch_size_xyz=patch_size_xyz,
 				grad_norm=grad_norm,
 			),
 			diagnostics_dir / f'nonfinite_mae_step_{global_step:08d}.json',
@@ -1027,6 +1035,7 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 	output: Mapping[str, object],
 	losses: Mapping[str, torch.Tensor],
 	amp_enabled: bool,
+	patch_size_xyz: tuple[int, int, int],
 	grad_norm: torch.Tensor | None,
 ) -> dict[str, object]:
 	coords = _json_safe(batch.get('coords'))
@@ -1042,6 +1051,11 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 		'tensors': {
 			'x': _summarize_tensor(batch.get('x')),
 			'target': _summarize_tensor(batch.get('target')),
+			'prediction': _summarize_prediction(
+				output.get('pred_patches'),
+				batch.get('target'),
+				patch_size_xyz,
+			),
 			'pred_patches': _summarize_tensor(output.get('pred_patches')),
 			'local_valid_mask': _summarize_tensor(batch.get('local_valid_mask')),
 			'spatial_mask': _summarize_tensor(batch.get('spatial_mask')),
@@ -1053,6 +1067,44 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 		'grad_norm': _summarize_tensor(grad_norm),
 		'torch_amp_enabled': bool(amp_enabled),
 	}
+
+
+def _summarize_prediction(
+	pred_patches: object,
+	target: object,
+	patch_size_xyz: tuple[int, int, int],
+) -> dict[str, object]:
+	if not isinstance(pred_patches, torch.Tensor):
+		return {'present': False, 'reason': 'pred_patches is not a tensor'}
+	if not isinstance(target, torch.Tensor):
+		return {'present': False, 'reason': 'target is not a tensor'}
+	if target.ndim != 5:
+		return {
+			'present': False,
+			'reason': f'target shape is not [B, C, X, Y, Z]: {tuple(target.shape)!r}',
+		}
+
+	spatial_shape = tuple(int(dim) for dim in target.shape[2:])
+	if any(
+		size % patch != 0
+		for size, patch in zip(spatial_shape, patch_size_xyz, strict=True)
+	):
+		return {
+			'present': False,
+			'reason': (
+				'target spatial shape is not divisible by patch_size_xyz: '
+				f'{spatial_shape!r} vs {patch_size_xyz!r}'
+			),
+		}
+
+	grid_size_xyz = tuple(
+		size // patch for size, patch in zip(spatial_shape, patch_size_xyz, strict=True)
+	)
+	try:
+		prediction = unpatchify_3d(pred_patches, patch_size_xyz, grid_size_xyz)
+	except ValueError as exc:
+		return {'present': False, 'reason': str(exc)}
+	return _summarize_tensor(prediction)
 
 
 def _write_json_diagnostic(payload: Mapping[str, object], path: str | Path) -> Path:

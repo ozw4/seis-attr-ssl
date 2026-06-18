@@ -300,7 +300,8 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 	assert payload['valid_voxel_count'] == 64
 	assert payload['tensors']['x']['all_finite'] is True
 	assert payload['tensors']['target']['all_finite'] is True
-	assert payload['tensors']['pred_patches']['all_finite'] is True
+	assert payload['tensors']['prediction']['all_finite'] is True
+	assert payload['tensors']['prediction']['shape'] == [1, 1, 4, 4, 4]
 	assert payload['losses']['loss'] == {
 		'value': None,
 		'finite': False,
