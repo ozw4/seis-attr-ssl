@@ -67,6 +67,16 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert (_path_like(cfg['paths']['output_root']) / 'run_metadata.json').is_file()
 
 
+def test_fresh_run_rejects_existing_snapshot_files(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	output_root = _path_like(cfg['paths']['output_root'])
+	output_root.mkdir(parents=True)
+	(output_root / 'resolved_config.json').write_text('{}\n', encoding='utf-8')
+
+	with pytest.raises(FileExistsError, match='output_root is nonempty'):
+		run_mae_pretraining(cfg)
+
+
 def test_resume_advances_global_step(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	cfg['train']['max_steps'] = 1

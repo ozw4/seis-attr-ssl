@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import torch
 
 from seis_ssl_cluster.data import (
@@ -68,6 +69,37 @@ def test_embedding_extraction_skip_existing_uses_matching_metadata(
 	result = run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 	assert result[0].skipped is True
+
+
+def test_embedding_extraction_skip_existing_restarts_incomplete_final_outputs(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	first = run_embedding_extraction(config, device='cpu')[0]
+	first.metadata_path.unlink()
+
+	result = run_embedding_extraction(config, skip_existing=True, device='cpu')
+
+	assert result[0].skipped is False
+	assert result[0].embeddings_path.is_file()
+	assert result[0].valid_tokens_path.is_file()
+	assert result[0].metadata_path.is_file()
+
+
+def test_embedding_extraction_rejects_complete_output_metadata_mismatch(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	first = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(first.metadata_path.read_text(encoding='utf-8'))
+	metadata['output_dtype'] = 'float32'
+	first.metadata_path.write_text(
+		json.dumps(metadata, indent=2, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+
+	with pytest.raises(ValueError, match='metadata does not match'):
+		run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 
 def _write_fixture(tmp_path: Path) -> dict[str, object]:

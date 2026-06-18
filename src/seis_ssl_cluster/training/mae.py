@@ -273,16 +273,21 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		torch.cuda.manual_seed_all(seed)
 
 	output_root = _resolve_output_root(paths_config)
+	allow_overwrite_output = _bool_config(
+		train_config,
+		'allow_overwrite_output',
+		default=False,
+	)
 	prepare_run_directory(
 		output_root=output_root,
 		resume=resume,
-		allow_overwrite=_bool_config(
-			train_config,
-			'allow_overwrite_output',
-			default=False,
-		),
+		allow_overwrite=allow_overwrite_output,
 	)
-	_snapshot_run_inputs(output_root=output_root, config=config)
+	_snapshot_run_inputs(
+		output_root=output_root,
+		config=config,
+		overwrite=allow_overwrite_output and resume is None,
+	)
 
 	samples_per_epoch = _optional_int_config(train_config, 'samples_per_epoch')
 	dataset = NopimsAmplitudePretrainDataset.from_config(
@@ -455,14 +460,7 @@ def prepare_run_directory(
 	output_root.mkdir(parents=True, exist_ok=True)
 	if resume is not None or allow_overwrite:
 		return
-	allowed = {
-		'inputs',
-		'metadata',
-		'resolved_config.json',
-		'manifest.json',
-		'run_metadata.json',
-	}
-	entries = [path for path in output_root.iterdir() if path.name not in allowed]
+	entries = list(output_root.iterdir())
 	if entries:
 		msg = (
 			f'output_root is nonempty: {output_root}. Set '
@@ -819,35 +817,41 @@ def _snapshot_run_inputs(
 	*,
 	output_root: Path,
 	config: Mapping[str, object],
+	overwrite: bool = False,
 ) -> None:
-	_write_json_if_missing(output_root / 'resolved_config.json', _to_json_safe(config))
+	_write_json_snapshot(
+		output_root / 'resolved_config.json',
+		_to_json_safe(config),
+		overwrite=overwrite,
+	)
 	manifest_path = _manifest_train_path(config)
-	_copy_if_missing(manifest_path, output_root / 'manifest.json')
+	_copy_snapshot(manifest_path, output_root / 'manifest.json', overwrite=overwrite)
 	path_list = _configured_path_list(config)
 	if path_list is not None and path_list.is_file():
 		inputs_dir = output_root / 'inputs'
 		inputs_dir.mkdir(parents=True, exist_ok=True)
-		_copy_if_missing(path_list, inputs_dir / path_list.name)
-	_write_json_if_missing(
+		_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
+	_write_json_snapshot(
 		output_root / 'run_metadata.json',
 		{
 			'created_at_utc': datetime.now(timezone.utc).isoformat(),
 			'git_commit': _git_commit(),
 			'package_version': getattr(seis_ssl_cluster, '__version__', None),
 		},
+		overwrite=overwrite,
 	)
 
 
-def _write_json_if_missing(path: Path, payload: object) -> None:
-	if path.exists():
+def _write_json_snapshot(path: Path, payload: object, *, overwrite: bool) -> None:
+	if path.exists() and not overwrite:
 		return
 	path.parent.mkdir(parents=True, exist_ok=True)
 	text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
 	path.write_text(f'{text}\n', encoding='utf-8')
 
 
-def _copy_if_missing(source: Path, target: Path) -> None:
-	if target.exists():
+def _copy_snapshot(source: Path, target: Path, *, overwrite: bool) -> None:
+	if target.exists() and not overwrite:
 		return
 	target.parent.mkdir(parents=True, exist_ok=True)
 	shutil.copy2(source, target)

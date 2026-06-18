@@ -21,6 +21,7 @@ from seis_ssl_cluster.embedding.sliding_window import (
 from seis_ssl_cluster.embedding.writer import (
 	EmbeddingOutputPaths,
 	cleanup_temp_outputs,
+	commit_staged_outputs,
 	create_merge_memmaps,
 	file_sha256,
 	metadata_matches,
@@ -38,6 +39,7 @@ __all__ = [
 	'build_embedding_metadata',
 	'build_model_from_config',
 	'cleanup_temp_outputs',
+	'commit_staged_outputs',
 	'compute_stride_xyz',
 	'create_merge_memmaps',
 	'extract_survey_embeddings',

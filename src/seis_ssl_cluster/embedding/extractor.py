@@ -34,11 +34,11 @@ from seis_ssl_cluster.embedding.sliding_window import (
 )
 from seis_ssl_cluster.embedding.writer import (
 	cleanup_temp_outputs,
+	commit_staged_outputs,
 	create_merge_memmaps,
 	file_sha256,
 	output_paths,
 	prepare_outputs,
-	write_metadata,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import patchify_3d
@@ -255,11 +255,11 @@ def extract_survey_embeddings(  # noqa: PLR0913
 			merger=merger,
 		)
 	merger.write_average(
-		embedding_path=paths.embeddings,
-		valid_tokens_path=paths.valid_tokens,
+		embedding_path=paths.embeddings_tmp,
+		valid_tokens_path=paths.valid_tokens_tmp,
 		output_dtype=settings.output_dtype,
 	)
-	write_metadata(paths.metadata, metadata)
+	commit_staged_outputs(paths, metadata)
 	cleanup_temp_outputs(paths)
 	return SurveyEmbeddingResult(
 		survey_id=manifest.survey_id,

@@ -17,6 +17,8 @@ class EmbeddingOutputPaths:
 	embeddings: Path
 	valid_tokens: Path
 	metadata: Path
+	embeddings_tmp: Path
+	valid_tokens_tmp: Path
 	sum_tmp: Path
 	count_tmp: Path
 
@@ -28,6 +30,8 @@ def output_paths(output_dir: str | Path, survey_id: str) -> EmbeddingOutputPaths
 		embeddings=root / f'{survey_id}.embeddings.npy',
 		valid_tokens=root / f'{survey_id}.valid_tokens.npy',
 		metadata=root / f'{survey_id}.embedding_metadata.json',
+		embeddings_tmp=root / f'.{survey_id}.embeddings.tmp.npy',
+		valid_tokens_tmp=root / f'.{survey_id}.valid_tokens.tmp.npy',
 		sum_tmp=root / f'.{survey_id}.embedding_sum.float32.npy',
 		count_tmp=root / f'.{survey_id}.embedding_count.uint32.npy',
 	)
@@ -40,21 +44,24 @@ def prepare_outputs(
 	skip_existing: bool,
 ) -> bool:
 	"""Return true when matching existing outputs should be skipped."""
-	existing_outputs = [
-		path
-		for path in (paths.embeddings, paths.valid_tokens, paths.metadata)
-		if path.exists()
-	]
-	if not existing_outputs:
-		paths.embeddings.parent.mkdir(parents=True, exist_ok=True)
-		return False
-	if not metadata_matches(paths.metadata, metadata):
+	paths.embeddings.parent.mkdir(parents=True, exist_ok=True)
+	cleanup_temp_outputs(paths)
+	complete_outputs = paths.embeddings.exists() and paths.valid_tokens.exists()
+	existing_metadata = _read_metadata(paths.metadata)
+	if existing_metadata == metadata and complete_outputs and skip_existing:
+		return True
+	if (
+		complete_outputs
+		and existing_metadata is not _METADATA_UNAVAILABLE
+		and existing_metadata != metadata
+	):
 		msg = (
 			'existing embedding output metadata does not match current settings: '
 			f'{paths.metadata}'
 		)
 		raise ValueError(msg)
-	return skip_existing and paths.embeddings.exists() and paths.valid_tokens.exists()
+	_remove_final_outputs(paths)
+	return False
 
 
 def create_merge_memmaps(
@@ -86,29 +93,66 @@ def write_metadata(path: str | Path, metadata: dict[str, object]) -> None:
 	"""Write deterministic extraction metadata."""
 	metadata_path = Path(path)
 	metadata_path.parent.mkdir(parents=True, exist_ok=True)
-	metadata_path.write_text(
-		json.dumps(metadata, indent=2, sort_keys=True) + '\n',
+	tmp_path = _metadata_tmp_path(metadata_path)
+	tmp_path.write_text(
+		json.dumps(metadata, indent=2, sort_keys=True, allow_nan=False) + '\n',
 		encoding='utf-8',
 	)
+	tmp_path.replace(metadata_path)
+
+
+def commit_staged_outputs(
+	paths: EmbeddingOutputPaths,
+	metadata: dict[str, object],
+) -> None:
+	"""Publish staged embedding arrays and matching metadata."""
+	for path in (paths.embeddings_tmp, paths.valid_tokens_tmp):
+		if not path.is_file():
+			msg = f'missing staged embedding output: {path}'
+			raise FileNotFoundError(msg)
+	write_metadata(paths.metadata, metadata)
+	paths.embeddings_tmp.replace(paths.embeddings)
+	paths.valid_tokens_tmp.replace(paths.valid_tokens)
 
 
 def metadata_matches(path: str | Path, metadata: dict[str, object]) -> bool:
 	"""Return true when an existing metadata JSON matches exactly."""
-	metadata_path = Path(path)
-	if not metadata_path.is_file():
-		return False
-	try:
-		existing = json.loads(metadata_path.read_text(encoding='utf-8'))
-	except json.JSONDecodeError:
-		return False
-	return existing == metadata
+	return _read_metadata(Path(path)) == metadata
 
 
 def cleanup_temp_outputs(paths: EmbeddingOutputPaths) -> None:
 	"""Remove temporary merge arrays left after a successful run."""
-	for path in (paths.sum_tmp, paths.count_tmp):
+	for path in (
+		paths.embeddings_tmp,
+		paths.valid_tokens_tmp,
+		_metadata_tmp_path(paths.metadata),
+		paths.sum_tmp,
+		paths.count_tmp,
+	):
 		if path.exists():
 			path.unlink()
+
+
+_METADATA_UNAVAILABLE = object()
+
+
+def _read_metadata(path: Path) -> object:
+	if not path.is_file():
+		return _METADATA_UNAVAILABLE
+	try:
+		return json.loads(path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError:
+		return _METADATA_UNAVAILABLE
+
+
+def _remove_final_outputs(paths: EmbeddingOutputPaths) -> None:
+	for path in (paths.embeddings, paths.valid_tokens, paths.metadata):
+		if path.exists():
+			path.unlink()
+
+
+def _metadata_tmp_path(path: Path) -> Path:
+	return path.with_name(f'.{path.name}.tmp')
 
 
 def file_sha256(path: str | Path) -> str:
@@ -123,6 +167,7 @@ def file_sha256(path: str | Path) -> str:
 __all__ = [
 	'EmbeddingOutputPaths',
 	'cleanup_temp_outputs',
+	'commit_staged_outputs',
 	'create_merge_memmaps',
 	'file_sha256',
 	'metadata_matches',
