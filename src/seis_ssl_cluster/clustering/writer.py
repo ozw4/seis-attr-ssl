@@ -15,6 +15,7 @@ from seis_ssl_cluster.clustering.features import (
 	embedding_input_metadata,
 	open_embedding_array,
 	valid_flat_indices,
+	validate_finite_feature_batch,
 )
 
 if TYPE_CHECKING:
@@ -120,6 +121,7 @@ def _write_survey_labels(  # noqa: PLR0913
 	for start in range(0, indices.size, prediction_batch_size):
 		batch_indices = indices[start : start + prediction_batch_size]
 		features = np.asarray(flat_embeddings[batch_indices], dtype=np.float32)
+		validate_finite_feature_batch(features, embedding_input.survey_id)
 		prepared = preprocessor.transform(features)
 		predicted = np.asarray(kmeans.predict(prepared), dtype=np.int32)
 		flat_labels[batch_indices] = predicted

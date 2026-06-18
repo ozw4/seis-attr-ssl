@@ -17,8 +17,8 @@ from sklearn.preprocessing import FunctionTransformer, Normalizer
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
 	discover_embedding_inputs,
-	embedding_dim,
 	embedding_input_metadata,
+	validate_compatible_embedding_inputs,
 )
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
@@ -80,7 +80,7 @@ def run_embedding_clustering(config: Mapping[str, object]) -> ClusteringRunResul
 	"""Run embedding-only clustering from a validated config mapping."""
 	settings = clustering_settings_from_config(config)
 	embedding_inputs = discover_embedding_inputs(settings.input_dir)
-	_validate_consistent_embedding_dims(embedding_inputs)
+	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
 	sample = sample_valid_embedding_tokens(
 		embedding_inputs,
 		sample_tokens=settings.sample_tokens,
@@ -99,6 +99,7 @@ def run_embedding_clustering(config: Mapping[str, object]) -> ClusteringRunResul
 	common_metadata = _common_metadata(
 		settings=settings,
 		embedding_inputs=embedding_inputs,
+		compatibility_signature=compatibility_signature,
 		sample=sample,
 		preprocessor=preprocessor,
 	)
@@ -276,6 +277,7 @@ def _common_metadata(
 	*,
 	settings: ClusteringSettings,
 	embedding_inputs: Sequence[EmbeddingInput],
+	compatibility_signature: Mapping[str, object],
 	sample: SampledTokens,
 	preprocessor: Pipeline,
 ) -> dict[str, object]:
@@ -284,6 +286,7 @@ def _common_metadata(
 			embedding_input_metadata(item)
 			for item in embedding_inputs
 		],
+		'embedding_compatibility_signature': dict(compatibility_signature),
 		'normalization': settings.embedding_normalization,
 		'pca': {
 			'enabled': settings.pca.enabled,
@@ -336,15 +339,6 @@ def _aggregate_counts(
 		int(label): int(count)
 		for label, count in enumerate(counts)
 	}
-
-
-def _validate_consistent_embedding_dims(
-	embedding_inputs: Sequence[EmbeddingInput],
-) -> None:
-	dims = {embedding_dim(item) for item in embedding_inputs}
-	if len(dims) != 1:
-		msg = f'all embedding inputs must have the same embedding dim; got {dims!r}'
-		raise ValueError(msg)
 
 
 def _validate_pca_components(
@@ -449,6 +443,9 @@ def _k_values(value: object) -> tuple[int, ...]:
 	values = tuple(_positive_int(item, 'clustering.k_values') for item in value)
 	if not values:
 		msg = 'clustering.k_values must not be empty'
+		raise ValueError(msg)
+	if len(set(values)) != len(values):
+		msg = f'clustering.k_values must not contain duplicates; got {values!r}'
 		raise ValueError(msg)
 	return values
 

@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from seis_ssl_cluster.clustering import run_embedding_clustering
 
@@ -61,6 +62,16 @@ def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
 			)
 			assert metadata['sample']['count'] == 7
 			assert metadata['invalid_token_count'] == 1
+			assert metadata['embedding_compatibility_signature']['embedding_dim'] == 3
+			assert [
+				item['survey_id']
+				for item in metadata['embedding_inputs']
+			] == ['survey_a', 'survey_b']
+			assert all(
+				item['metadata_path'].endswith('.embedding_metadata.json')
+				and len(item['metadata_sha256']) == 64
+				for item in metadata['embedding_inputs']
+			)
 
 	survey_a_first = np.load(
 		first_output / 'labels' / 'k2' / 'survey_a.cluster_labels_token.npy',
@@ -76,6 +87,135 @@ def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
 	for result in first.results:
 		assert sum(result.cluster_counts.values()) == 7
 		assert result.invalid_token_count == 1
+
+
+def test_run_embedding_clustering_rejects_different_checkpoint_hashes(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_b',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+		metadata_updates={'checkpoint_sha256': 'checkpoint-b'},
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r"survey_a.*survey_b.*checkpoint_sha256",
+	):
+		run_embedding_clustering(_config(input_dir, tmp_path / 'clusters'))
+
+
+def test_run_embedding_clustering_rejects_different_model_geometry(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_b',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+		metadata_updates={
+			'model_geometry': {
+				'name': 'amp_mae3d',
+				'encoder_dim': 3,
+				'encoder_depth': 2,
+				'encoder_heads': 1,
+			},
+			'patch_size': [1, 2, 2],
+		},
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r"survey_a.*survey_b.*model_geometry.*patch_size",
+	):
+		run_embedding_clustering(_config(input_dir, tmp_path / 'clusters'))
+
+
+def test_run_embedding_clustering_rejects_different_extraction_contract(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_b',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+		metadata_updates={
+			'window_size': [6, 4, 4],
+			'overlap': [3, 2, 2],
+			'zero_mask': {
+				'enabled': False,
+				'zero_atol': 0.0,
+				'z_sample_influence_radius': 1,
+				'xy_trace_influence_radius': 1,
+			},
+		},
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r"survey_a.*survey_b.*window_size.*overlap.*zero_mask",
+	):
+		run_embedding_clustering(_config(input_dir, tmp_path / 'clusters'))
+
+
+def test_run_embedding_clustering_rejects_duplicate_k_values(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	config = _config(input_dir, tmp_path / 'clusters')
+	config['clustering']['k_values'] = [2, 2]
+
+	with pytest.raises(ValueError, match=r'k_values.*duplicates'):
+		run_embedding_clustering(config)
+
+
+def test_run_embedding_clustering_reports_non_finite_feature_survey(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 3), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_bad',
+		embeddings=np.array([[[[np.inf, 1.0, 1.0], [1.0, 1.0, 1.0]]]]),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+
+	with pytest.raises(ValueError, match=r'non-finite.*survey_bad'):
+		run_embedding_clustering(_config(input_dir, tmp_path / 'clusters'))
 
 
 def _config(input_dir: Path, output_dir: Path) -> dict[str, object]:
@@ -104,10 +244,45 @@ def _write_embedding_artifacts(
 	*,
 	embeddings: np.ndarray,
 	valid: np.ndarray,
+	metadata_updates: dict[str, object] | None = None,
 ) -> None:
 	np.save(root / f'{survey_id}.embeddings.npy', embeddings)
 	np.save(root / f'{survey_id}.valid_tokens.npy', valid.astype(np.bool_))
+	metadata = _embedding_metadata(survey_id, embeddings.shape[:3])
+	if metadata_updates:
+		metadata.update(metadata_updates)
 	(root / f'{survey_id}.embedding_metadata.json').write_text(
-		json.dumps({'survey_id': survey_id}) + '\n',
+		json.dumps(metadata) + '\n',
 		encoding='utf-8',
 	)
+
+
+def _embedding_metadata(
+	survey_id: str,
+	token_grid_shape: tuple[int, int, int],
+) -> dict[str, object]:
+	return {
+		'survey_id': survey_id,
+		'source_amplitude_path': f'{survey_id}.npy',
+		'checkpoint_path': 'checkpoint.pt',
+		'checkpoint_sha256': 'checkpoint-a',
+		'model_geometry': {
+			'name': 'amp_mae3d',
+			'encoder_dim': 3,
+			'encoder_depth': 1,
+			'encoder_heads': 1,
+		},
+		'patch_size': [2, 2, 2],
+		'token_grid_shape': list(token_grid_shape),
+		'window_size': [4, 4, 4],
+		'overlap': [2, 2, 2],
+		'normalization_stats_path': f'{survey_id}.normalization_stats.json',
+		'output_dtype': 'float32',
+		'min_token_valid_fraction': 0.5,
+		'zero_mask': {
+			'enabled': True,
+			'zero_atol': 0.0,
+			'z_sample_influence_radius': 1,
+			'xy_trace_influence_radius': 1,
+		},
+	}
