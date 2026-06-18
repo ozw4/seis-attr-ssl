@@ -45,6 +45,16 @@ def test_default_configs_validate(config_path: Path) -> None:
 		)
 
 
+def test_default_manifest_and_qc_configs_use_same_source_path_list() -> None:
+	build_cfg = load_config(CONFIG_DIR / 'build_nopims_manifests.yaml')
+	filter_cfg = load_config(CONFIG_DIR / 'filter_manifest_by_normalization_qc.yaml')
+
+	assert (
+		build_cfg['manifest']['input_path_list']
+		== filter_cfg['splits']['input']
+	)
+
+
 def test_load_config_applies_path_defaults(tmp_path: Path) -> None:
 	config_path = tmp_path / 'amp.yaml'
 	config_path.write_text(
