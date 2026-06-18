@@ -37,6 +37,8 @@ Thumbs.db
 data/
 !src/seis_attr_ssl/data/
 !src/seis_attr_ssl/data/__init__.py
+!src/seis_ssl_cluster/data/
+!src/seis_ssl_cluster/data/__init__.py
 result/
 tmp_code/
 debug_*/
