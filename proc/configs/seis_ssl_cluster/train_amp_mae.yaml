@@ -4,6 +4,7 @@ paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+  train_path_list: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap

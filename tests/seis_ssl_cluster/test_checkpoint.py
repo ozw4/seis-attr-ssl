@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from seis_ssl_cluster.training import load_checkpoint, save_checkpoint
+from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_state
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -91,3 +92,16 @@ def test_save_checkpoint_requires_scaler_when_amp_enabled(tmp_path: Path) -> Non
 			amp_enabled=True,
 			scaler=None,
 		)
+
+
+def test_restore_rng_state_rejects_partial_rng_payload() -> None:
+	with pytest.raises(TypeError, match='rng_state must be a mapping'):
+		restore_rng_state({})
+
+	payload: dict[str, object] = {'rng_state': capture_rng_state()}
+	rng_state = payload['rng_state']
+	assert isinstance(rng_state, dict)
+	rng_state['torch'] = None
+
+	with pytest.raises(TypeError, match=r'rng_state\.torch'):
+		restore_rng_state(payload)

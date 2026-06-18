@@ -67,6 +67,18 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert (_path_like(cfg['paths']['output_root']) / 'run_metadata.json').is_file()
 
 
+def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	path_list = tmp_path / 'train_paths.txt'
+	path_list.write_text('survey/amplitude.npy\n', encoding='utf-8')
+	cfg['manifests']['train_path_list'] = str(path_list)
+
+	run_mae_pretraining(cfg)
+
+	snapshot = _path_like(cfg['paths']['output_root']) / 'inputs' / path_list.name
+	assert snapshot.read_text(encoding='utf-8') == 'survey/amplitude.npy\n'
+
+
 def test_fresh_run_rejects_existing_snapshot_files(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	output_root = _path_like(cfg['paths']['output_root'])
@@ -197,6 +209,28 @@ def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='dataloader_generator'):
 		run_mae_pretraining(cfg, resume=partial_path)
+
+	for key in ('schema_version', 'stage', 'checkpoint_kind', 'batch_index'):
+		partial_path = tmp_path / f'missing-training-state-{key}.pt'
+		partial_payload = dict(payload)
+		training_state = dict(payload['training_state'])
+		training_state.pop(key)
+		partial_payload['training_state'] = training_state
+		torch.save(partial_payload, partial_path)
+
+		with pytest.raises(ValueError, match=fr'training_state is missing {key}'):
+			run_mae_pretraining(cfg, resume=partial_path)
+
+	for key in ('python', 'numpy', 'torch', 'dataloader_generator'):
+		partial_path = tmp_path / f'invalid-rng-{key}.pt'
+		partial_payload = dict(payload)
+		rng_state = dict(payload['rng_state'])
+		rng_state[key] = None
+		partial_payload['rng_state'] = rng_state
+		torch.save(partial_payload, partial_path)
+
+		with pytest.raises(TypeError, match=fr'rng_state\.{key}'):
+			run_mae_pretraining(cfg, resume=partial_path)
 
 
 def test_amp_resume_requires_scaler_state(tmp_path: Path) -> None:

@@ -90,22 +90,68 @@ def capture_rng_state() -> dict[str, object]:
 
 
 def restore_rng_state(payload: Mapping[str, object]) -> None:
-	"""Restore RNG state from ``payload`` when present."""
+	"""Restore RNG state from ``payload``.
+
+	Partial or malformed RNG state is rejected so checkpoint resume cannot
+	quietly continue with nondeterministic state.
+	"""
 	rng_state = payload.get('rng_state')
 	if not isinstance(rng_state, Mapping):
-		return
-	python_state = rng_state.get('python')
-	if python_state is not None:
-		random.setstate(python_state)
-	numpy_state = rng_state.get('numpy')
-	if numpy_state is not None:
-		np.random.set_state(numpy_state)  # noqa: NPY002
-	torch_state = rng_state.get('torch')
-	if isinstance(torch_state, torch.Tensor):
-		torch.set_rng_state(torch_state.cpu())
+		msg = 'checkpoint rng_state must be a mapping'
+		raise TypeError(msg)
+	python_state = _required_rng_value(rng_state, 'python')
+	if not isinstance(python_state, tuple):
+		msg = 'checkpoint rng_state.python must be a tuple'
+		raise TypeError(msg)
+
+	numpy_state = _required_rng_value(rng_state, 'numpy')
+	if not _is_numpy_rng_state(numpy_state):
+		msg = 'checkpoint rng_state.numpy must be a NumPy RNG state tuple'
+		raise TypeError(msg)
+
+	torch_state = _required_rng_value(rng_state, 'torch')
+	if not isinstance(torch_state, torch.Tensor):
+		msg = 'checkpoint rng_state.torch must be a tensor'
+		raise TypeError(msg)
+
 	cuda_state = rng_state.get('torch_cuda')
+	if cuda_state is not None and not _is_cuda_rng_state(cuda_state):
+		msg = 'checkpoint rng_state.torch_cuda must be a list of tensors'
+		raise TypeError(msg)
+	random.setstate(python_state)
+	np.random.set_state(numpy_state)  # noqa: NPY002
+	torch.set_rng_state(torch_state.cpu())
 	if torch.cuda.is_available() and isinstance(cuda_state, list):
 		torch.cuda.set_rng_state_all(cuda_state)
+
+
+def _required_rng_value(rng_state: Mapping[str, object], key: str) -> object:
+	if key not in rng_state:
+		msg = f'checkpoint rng_state is missing {key}'
+		raise ValueError(msg)
+	value = rng_state[key]
+	if value is None:
+		msg = f'checkpoint rng_state.{key} must not be null'
+		raise TypeError(msg)
+	return value
+
+
+def _is_numpy_rng_state(value: object) -> bool:
+	return (
+		isinstance(value, tuple)
+		and len(value) == 5
+		and isinstance(value[0], str)
+		and isinstance(value[1], np.ndarray)
+		and isinstance(value[2], int)
+		and isinstance(value[3], int)
+		and isinstance(value[4], float)
+	)
+
+
+def _is_cuda_rng_state(value: object) -> bool:
+	return isinstance(value, list) and all(
+		isinstance(child, torch.Tensor) for child in value
+	)
 
 
 def _to_plain_value(value: object) -> object:

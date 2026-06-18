@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, cast
 
+import numpy as np
 import torch
 
 import seis_ssl_cluster
@@ -536,17 +537,17 @@ def _restore_mae_checkpoint(
 		scaler.load_state_dict(payload['scaler_state_dict'])
 	restore_rng_state(payload)
 
-	training_state = payload.get('training_state')
-	checkpoint_kind = None
-	batch_index = None
-	if isinstance(training_state, Mapping):
-		checkpoint_kind = training_state.get('checkpoint_kind')
-		batch_index = training_state.get('batch_index')
-	if checkpoint_kind == 'step' and isinstance(batch_index, int):
+	training_state = payload['training_state']
+	if not isinstance(training_state, Mapping):
+		msg = 'resume checkpoint training_state must be a mapping'
+		raise TypeError(msg)
+	checkpoint_kind = training_state['checkpoint_kind']
+	batch_index = training_state['batch_index']
+	if checkpoint_kind == 'step':
 		return ResumeState(
 			start_epoch=int(payload['epoch']),
 			global_step=int(payload.get('global_step', 0)),
-			skip_batches=batch_index + 1,
+			skip_batches=int(batch_index) + 1,
 		)
 	return ResumeState(
 		start_epoch=int(payload['epoch']) + 1,
@@ -730,6 +731,7 @@ def _validate_resume_payload(
 	_validate_resume_mapping_fields(payload)
 	_validate_resume_counters(payload)
 	_validate_resume_rng_state(payload)
+	_validate_resume_training_state(payload)
 	_validate_resume_amp_state(payload, amp_enabled=amp_enabled)
 	stage = _checkpoint_stage(payload)
 	if stage is not None and stage != 'train_amp_mae':
@@ -755,6 +757,9 @@ def _validate_resume_counters(payload: Mapping[str, object]) -> None:
 	if not isinstance(payload['epoch'], int) or isinstance(payload['epoch'], bool):
 		msg = 'resume checkpoint epoch must be an integer'
 		raise TypeError(msg)
+	if payload['epoch'] < 0:
+		msg = 'resume checkpoint epoch must be nonnegative'
+		raise ValueError(msg)
 	if (
 		not isinstance(payload['global_step'], int)
 		or isinstance(payload['global_step'], bool)
@@ -788,9 +793,105 @@ def _validate_resume_rng_state(payload: Mapping[str, object]) -> None:
 		if key not in rng_state:
 			msg = f'resume checkpoint rng_state is missing {key}'
 			raise ValueError(msg)
+	if not isinstance(rng_state['python'], tuple):
+		msg = 'resume checkpoint rng_state.python must be a tuple'
+		raise TypeError(msg)
+	if not _is_numpy_rng_state(rng_state['numpy']):
+		msg = 'resume checkpoint rng_state.numpy must be a NumPy RNG state tuple'
+		raise TypeError(msg)
+	if not isinstance(rng_state['torch'], torch.Tensor):
+		msg = 'resume checkpoint rng_state.torch must be a tensor'
+		raise TypeError(msg)
 	if not isinstance(rng_state['dataloader_generator'], torch.Tensor):
 		msg = 'resume checkpoint rng_state.dataloader_generator must be a tensor'
 		raise TypeError(msg)
+	cuda_state = rng_state.get('torch_cuda')
+	if cuda_state is not None and not _is_cuda_rng_state(cuda_state):
+		msg = 'resume checkpoint rng_state.torch_cuda must be a list of tensors'
+		raise TypeError(msg)
+
+
+def _validate_resume_training_state(payload: Mapping[str, object]) -> None:
+	training_state = payload['training_state']
+	if not isinstance(training_state, Mapping):
+		msg = 'resume checkpoint training_state must be a mapping'
+		raise TypeError(msg)
+	for key in ('schema_version', 'stage', 'checkpoint_kind', 'batch_index'):
+		if key not in training_state:
+			msg = f'resume checkpoint training_state is missing {key}'
+			raise ValueError(msg)
+	if training_state['schema_version'] != 1:
+		msg = (
+			'resume checkpoint training_state.schema_version must be 1; '
+			f"got {training_state['schema_version']!r}"
+		)
+		raise ValueError(msg)
+	if training_state['stage'] != 'train_amp_mae':
+		msg = (
+			'resume checkpoint training_state.stage must be train_amp_mae; '
+			f"got {training_state['stage']!r}"
+		)
+		raise ValueError(msg)
+
+	checkpoint_kind = _validate_resume_checkpoint_kind(
+		training_state['checkpoint_kind'],
+	)
+	_validate_resume_training_batch_index(
+		checkpoint_kind=checkpoint_kind,
+		batch_index=training_state['batch_index'],
+	)
+
+
+def _validate_resume_checkpoint_kind(value: object) -> Literal['epoch', 'step']:
+	if value not in ('epoch', 'step'):
+		msg = (
+			'resume checkpoint training_state.checkpoint_kind must be '
+			f"'epoch' or 'step'; got {value!r}"
+		)
+		raise ValueError(msg)
+	return cast('Literal["epoch", "step"]', value)
+
+
+def _validate_resume_training_batch_index(
+	*,
+	checkpoint_kind: Literal['epoch', 'step'],
+	batch_index: object,
+) -> None:
+	if checkpoint_kind == 'epoch':
+		if batch_index is not None:
+			msg = (
+				'resume checkpoint training_state.batch_index must be null '
+				'for epoch checkpoints'
+			)
+			raise ValueError(msg)
+		return
+	if not isinstance(batch_index, int) or isinstance(batch_index, bool):
+		msg = (
+			'resume checkpoint training_state.batch_index must be an integer '
+			'for step checkpoints'
+		)
+		raise TypeError(msg)
+	if batch_index < 0:
+		msg = 'resume checkpoint training_state.batch_index must be nonnegative'
+		raise ValueError(msg)
+
+
+def _is_numpy_rng_state(value: object) -> bool:
+	return (
+		isinstance(value, tuple)
+		and len(value) == 5
+		and isinstance(value[0], str)
+		and isinstance(value[1], np.ndarray)
+		and isinstance(value[2], int)
+		and isinstance(value[3], int)
+		and isinstance(value[4], float)
+	)
+
+
+def _is_cuda_rng_state(value: object) -> bool:
+	return isinstance(value, list) and all(
+		isinstance(child, torch.Tensor) for child in value
+	)
 
 
 def _checkpoint_stage(payload: Mapping[str, object]) -> object | None:
@@ -862,12 +963,18 @@ def _copy_snapshot(source: Path, target: Path, *, overwrite: bool) -> None:
 
 
 def _configured_path_list(config: Mapping[str, object]) -> Path | None:
-	manifest_config = config.get('manifest')
-	if not isinstance(manifest_config, Mapping):
+	manifests = config.get('manifests')
+	if not isinstance(manifests, Mapping):
 		return None
-	path_value = manifest_config.get('input_path_list')
+	path_value = manifests.get('train_path_list')
+	if path_value is None:
+		return None
 	if not isinstance(path_value, str) or not path_value:
-		return None
+		msg = (
+			'manifests.train_path_list must be a non-empty string when '
+			f'configured; got {path_value!r}'
+		)
+		raise ValueError(msg)
 	return Path(path_value)
 
 
