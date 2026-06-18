@@ -7,6 +7,10 @@ manifests:
 embeddings:
   checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/train_amp_mae/checkpoints/best.pt
   output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
+embedding:
+  output_dtype: float16
+  batch_size: 1
+  min_token_valid_fraction: 1.0
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
