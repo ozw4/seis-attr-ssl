@@ -79,14 +79,19 @@ def run_embedding_extraction(
 	device: str | torch.device | None = None,
 ) -> list[SurveyEmbeddingResult]:
 	"""Extract MAE encoder embeddings for all surveys in a manifest."""
-	settings = extraction_settings_from_config(config)
+	checkpoint_path = _checkpoint_path(config)
 	manifests = read_manifest_json(_manifest_path(config))
 	if not manifests:
 		msg = 'embedding extraction manifest is empty'
 		raise ValueError(msg)
 
-	payload = load_checkpoint(settings.checkpoint_path, map_location='cpu')
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 	checkpoint_config = _checkpoint_config(payload, config)
+	settings = extraction_settings_from_config(
+		config,
+		checkpoint_config=checkpoint_config,
+	)
+	checkpoint_sha256 = file_sha256(settings.checkpoint_path)
 	model_state_dict = _model_state_dict(payload)
 	checkpoint_dtype = _checkpoint_floating_dtype(model_state_dict)
 	model = build_model_from_config(checkpoint_config)
@@ -104,6 +109,7 @@ def run_embedding_extraction(
 			store=store,
 			settings=settings,
 			checkpoint_config=checkpoint_config,
+			checkpoint_sha256=checkpoint_sha256,
 			device=resolved_device,
 			skip_existing=skip_existing,
 		)
@@ -113,6 +119,8 @@ def run_embedding_extraction(
 
 def extraction_settings_from_config(
 	config: Mapping[str, object],
+	*,
+	checkpoint_config: Mapping[str, object] | None = None,
 ) -> EmbeddingExtractionSettings:
 	"""Build extraction settings from validated config sections."""
 	embeddings = _required_mapping(config, 'embeddings')
@@ -133,8 +141,11 @@ def extraction_settings_from_config(
 		default=(0, 0, 0),
 	)
 	output_dtype = np.dtype(embedding.get('output_dtype', 'float16'))
-	if output_dtype.kind not in {'f', 'i', 'u'}:
-		msg = f'embedding.output_dtype must be numeric; got {output_dtype}'
+	if output_dtype.kind != 'f':
+		msg = (
+			'embedding.output_dtype must be a floating-point NumPy dtype; '
+			f'got {output_dtype}'
+		)
 		raise TypeError(msg)
 	return EmbeddingExtractionSettings(
 		checkpoint_path=checkpoint_path,
@@ -150,7 +161,10 @@ def extraction_settings_from_config(
 			embedding.get('min_token_valid_fraction', 0.5),
 			'embedding.min_token_valid_fraction',
 		),
-		zero_mask=_zero_mask_from_config(config),
+		zero_mask=_zero_mask_for_extraction(
+			config,
+			checkpoint_config if checkpoint_config is not None else config,
+		),
 	)
 
 
@@ -194,6 +208,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 	store: NpyMemmapVolumeStore,
 	settings: EmbeddingExtractionSettings,
 	checkpoint_config: Mapping[str, object],
+	checkpoint_sha256: str,
 	device: torch.device,
 	skip_existing: bool,
 ) -> SurveyEmbeddingResult:
@@ -213,6 +228,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		stats_path=stats_path,
 		settings=settings,
 		checkpoint_config=checkpoint_config,
+		checkpoint_sha256=checkpoint_sha256,
 		model=model,
 		token_grid_shape=token_grid,
 	)
@@ -280,15 +296,21 @@ def build_embedding_metadata(  # noqa: PLR0913
 	stats_path: Path,
 	settings: EmbeddingExtractionSettings,
 	checkpoint_config: Mapping[str, object],
+	checkpoint_sha256: str | None = None,
 	model: AmplitudeMAE3D,
 	token_grid_shape: XYZ,
 ) -> dict[str, object]:
 	"""Return deterministic metadata for one survey output."""
+	resolved_checkpoint_sha256 = (
+		file_sha256(settings.checkpoint_path)
+		if checkpoint_sha256 is None
+		else checkpoint_sha256
+	)
 	return {
 		'survey_id': manifest.survey_id,
 		'source_amplitude_path': str(amplitude_path),
 		'checkpoint_path': str(settings.checkpoint_path),
-		'checkpoint_sha256': file_sha256(settings.checkpoint_path),
+		'checkpoint_sha256': resolved_checkpoint_sha256,
 		'model_geometry': _model_geometry(checkpoint_config, model),
 		'patch_size': list(model.patch_size_xyz),
 		'token_grid_shape': list(token_grid_shape),
@@ -484,10 +506,19 @@ def _model_geometry(
 		'name': model_config.get('name', 'amp_mae3d'),
 		'in_channels': model.in_channels,
 		'out_channels': model.out_channels,
-		'encoder_dim': model.encoder_dim,
-		'decoder_dim': model.decoder_dim,
 		'patch_size': list(model.patch_size_xyz),
+		'encoder_dim': model.encoder_dim,
+		'encoder_depth': model.encoder.depth,
+		'encoder_heads': model.encoder.num_heads,
+		'decoder_dim': model.decoder_dim,
+		'decoder_depth': model.decoder.depth,
+		'decoder_heads': model.decoder.num_heads,
 	}
+
+
+def _checkpoint_path(config: Mapping[str, object]) -> Path:
+	embeddings = _required_mapping(config, 'embeddings')
+	return _required_path(embeddings, 'checkpoint', 'embeddings')
 
 
 def _manifest_path(config: Mapping[str, object]) -> Path:
@@ -512,13 +543,45 @@ def _resolve_device(
 
 
 def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
-	value = config.get('zero_mask')
-	if value is None:
-		data = config.get('data')
-		if isinstance(data, Mapping):
-			value = data.get('zero_mask')
+	value = _zero_mask_mapping_from_config(config)
 	if value is None:
 		return DEFAULT_ZERO_MASK_CONFIG
+	return _zero_mask_from_mapping(value)
+
+
+def _zero_mask_for_extraction(
+	extraction_config: Mapping[str, object],
+	checkpoint_config: Mapping[str, object],
+) -> ZeroMaskConfig:
+	checkpoint_zero_mask = _zero_mask_from_config(checkpoint_config)
+	override_value = _zero_mask_mapping_from_config(extraction_config)
+	if override_value is None:
+		return checkpoint_zero_mask
+
+	override_zero_mask = _zero_mask_from_mapping(override_value)
+	if override_zero_mask != checkpoint_zero_mask:
+		msg = (
+			'extraction zero_mask override must match checkpoint zero_mask '
+			f'settings; got {override_zero_mask!r}, checkpoint has '
+			f'{checkpoint_zero_mask!r}'
+		)
+		raise ValueError(msg)
+	return checkpoint_zero_mask
+
+
+def _zero_mask_mapping_from_config(
+	config: Mapping[str, object],
+) -> object:
+	value = config.get('zero_mask')
+	if value is not None:
+		return value
+	data = config.get('data')
+	if isinstance(data, Mapping):
+		return data.get('zero_mask')
+	return None
+
+
+def _zero_mask_from_mapping(value: object) -> ZeroMaskConfig:
 	if not isinstance(value, Mapping):
 		msg = f'zero_mask config must be a mapping; got {value!r}'
 		raise TypeError(msg)
