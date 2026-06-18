@@ -37,7 +37,10 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	assert 'data.input_channels: 1' in result.stdout
 	assert 'data.target_channels: 1' in result.stdout
 	assert 'data.use_context: false' in result.stdout
-	assert 'execution: dry-run; implementation pending' in result.stdout
+	if script_path == Path('proc/seis_ssl_cluster/build_nopims_manifests.py'):
+		assert 'manifest scan: skipped' in result.stdout
+	else:
+		assert 'execution: dry-run; implementation pending' in result.stdout
 
 
 def test_proc_script_rejects_legacy_attribute_config(tmp_path: Path) -> None:

@@ -34,6 +34,15 @@ def test_default_configs_validate(config_path: Path) -> None:
 	assert cfg['data']['use_context'] is False
 	assert cfg['model']['in_channels'] == 1
 	assert cfg['model']['out_channels'] == 1
+	if config_path.name == 'build_nopims_manifests.yaml':
+		expected_stats_dir = (
+			'/workspace/artifacts/seis_ssl_cluster/registry/normalization_stats'
+			'/nopims/pretrain_v1'
+		)
+		assert (
+			cfg['manifest']['normalization_stats_dir']
+			== expected_stats_dir
+		)
 
 
 def test_load_config_applies_path_defaults(tmp_path: Path) -> None:

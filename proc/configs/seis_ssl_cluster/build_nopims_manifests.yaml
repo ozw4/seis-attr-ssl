@@ -2,9 +2,11 @@ stage: build_nopims_manifests
 paths:
   nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
-manifests:
+manifest:
   input_path_list: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
   output_dir: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1
+  output_name: nopims_amplitude_manifests.json
+  normalization_stats_dir: /workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/nopims/pretrain_v1
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
