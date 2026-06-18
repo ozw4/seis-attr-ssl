@@ -27,6 +27,10 @@ from seis_ssl_cluster.data.zero_mask import (
 	ZeroMaskConfig,
 	compute_zero_amplitude_invalid_mask,
 )
+from seis_ssl_cluster.masking import (
+	build_spatial_masking_plan,
+	compute_token_grid_shape,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -43,6 +47,10 @@ class NopimsAmplitudePretrainDataset:
 		self,
 		manifests: Sequence[SurveyManifest],
 		local_crop_size_xyz: Sequence[int] = (128, 128, 128),
+		patch_size_xyz: Sequence[int] = (8, 8, 8),
+		spatial_mask_ratio: float = 0.75,
+		spatial_mask_mode: str = 'block',
+		block_size_tokens_xyz: Sequence[int] = (2, 2, 2),
 		seed: int = 42,
 		samples_per_epoch: int | None = None,
 		zero_mask: ZeroMaskConfig = DEFAULT_ZERO_MASK_CONFIG,
@@ -57,6 +65,29 @@ class NopimsAmplitudePretrainDataset:
 		self.local_crop_size_xyz = _validate_xyz(
 			local_crop_size_xyz,
 			'local_crop_size_xyz',
+		)
+		self.patch_size_xyz = _validate_xyz(patch_size_xyz, 'patch_size_xyz')
+		self.token_grid_shape_xyz = compute_token_grid_shape(
+			self.local_crop_size_xyz,
+			self.patch_size_xyz,
+		)
+		if int(np.prod(self.token_grid_shape_xyz)) < 2:
+			msg = (
+				'token grid must contain at least two tokens to keep one '
+				'masked and one visible token'
+			)
+			raise ValueError(msg)
+		self.spatial_mask_ratio = _validate_open_fraction(
+			spatial_mask_ratio,
+			'spatial_mask_ratio',
+		)
+		if spatial_mask_mode != 'block':
+			msg = f"spatial_mask_mode must be 'block'; got {spatial_mask_mode!r}"
+			raise ValueError(msg)
+		self.spatial_mask_mode = spatial_mask_mode
+		self.block_size_tokens_xyz = _validate_xyz(
+			block_size_tokens_xyz,
+			'block_size_tokens_xyz',
 		)
 		self.seed = _validate_nonnegative_int(seed, 'seed')
 		self.epoch = 0
@@ -95,6 +126,8 @@ class NopimsAmplitudePretrainDataset:
 	) -> NopimsAmplitudePretrainDataset:
 		"""Build an amplitude-only dataset from validated config sections."""
 		data = _require_config_mapping(config, 'data')
+		model = _require_config_mapping(config, 'model')
+		masking = _require_config_mapping(config, 'masking')
 		train = _require_config_mapping(config, 'train')
 		resolved_samples = samples_per_epoch
 		if resolved_samples is None and 'samples_per_epoch' in train:
@@ -105,6 +138,13 @@ class NopimsAmplitudePretrainDataset:
 		return cls(
 			manifests,
 			local_crop_size_xyz=data.get('local_crop_size', (128, 128, 128)),
+			patch_size_xyz=model.get('patch_size', (8, 8, 8)),
+			spatial_mask_ratio=masking.get('spatial_mask_ratio', 0.75),
+			spatial_mask_mode=masking.get('spatial_mask_mode', 'block'),
+			block_size_tokens_xyz=masking.get(
+				'block_size_tokens',
+				(2, 2, 2),
+			),
 			seed=train.get('seed', 42),
 			samples_per_epoch=resolved_samples,
 			zero_mask=_zero_mask_from_config(config),
@@ -139,6 +179,7 @@ class NopimsAmplitudePretrainDataset:
 			sample = self._read_sample(manifest, local_request)
 			valid_fraction = float(np.mean(sample['local_valid_mask']))
 			if valid_fraction >= self.min_valid_fraction:
+				self._add_spatial_masks(sample, rng)
 				return sample
 			last_sample = sample
 			last_valid_fraction = valid_fraction
@@ -233,6 +274,22 @@ class NopimsAmplitudePretrainDataset:
 				'local_size_xyz': local_request.size_xyz,
 			},
 		}
+
+	def _add_spatial_masks(
+		self,
+		sample: dict[str, object],
+		rng: np.random.Generator,
+	) -> None:
+		plan = build_spatial_masking_plan(
+			local_crop_size_xyz=self.local_crop_size_xyz,
+			patch_size_xyz=self.patch_size_xyz,
+			spatial_mask_ratio=self.spatial_mask_ratio,
+			spatial_mask_mode=self.spatial_mask_mode,
+			block_size_tokens_xyz=self.block_size_tokens_xyz,
+			rng=rng,
+		)
+		sample['spatial_mask'] = plan.spatial_mask
+		sample['visible_spatial_mask'] = plan.visible_spatial_mask
 
 	def _zero_mask_margin_xyz(self) -> XYZ:
 		if not self.zero_mask.enabled:
@@ -333,6 +390,17 @@ def _validate_fraction(value: object, name: str) -> float:
 	fraction = float(value)
 	if not 0.0 <= fraction <= 1.0:
 		msg = f'{name} must be in [0, 1]; got {fraction!r}'
+		raise ValueError(msg)
+	return fraction
+
+
+def _validate_open_fraction(value: object, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	fraction = float(value)
+	if not 0.0 < fraction < 1.0:
+		msg = f'{name} must be in (0, 1); got {fraction!r}'
 		raise ValueError(msg)
 	return fraction
 

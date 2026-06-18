@@ -83,19 +83,33 @@ def test_amplitude_dataset_returns_one_channel_sample_contract(tmp_path: Path) -
 	dataset = NopimsAmplitudePretrainDataset(
 		[_manifest(tmp_path, 'survey', volume)],
 		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
 		seed=7,
 		zero_mask=ZeroMaskConfig(enabled=False),
 	)
 
 	sample = dataset[0]
 
-	assert set(sample) == {'x', 'target', 'local_valid_mask', 'coords'}
+	assert set(sample) == {
+		'x',
+		'target',
+		'local_valid_mask',
+		'coords',
+		'spatial_mask',
+		'visible_spatial_mask',
+	}
 	assert sample['x'].shape == (1, 4, 4, 4)
 	assert sample['x'].dtype == np.float32
 	np.testing.assert_array_equal(sample['x'], sample['target'])
 	assert sample['local_valid_mask'].shape == (4, 4, 4)
 	assert sample['local_valid_mask'].dtype == np.bool_
 	assert sample['local_valid_mask'].all()
+	assert sample['spatial_mask'].shape == (2, 2, 2)
+	assert sample['spatial_mask'].dtype == np.bool_
+	np.testing.assert_array_equal(
+		sample['visible_spatial_mask'],
+		np.logical_not(sample['spatial_mask']),
+	)
 	assert sample['coords']['survey_id'] == 'survey'
 	assert sample['coords']['local_size_xyz'] == (4, 4, 4)
 	assert not any('attribute' in key for key in sample)
@@ -107,6 +121,7 @@ def test_amplitude_dataset_uses_manifest_order_round_robin(tmp_path: Path) -> No
 	dataset = NopimsAmplitudePretrainDataset(
 		[manifest_a, manifest_b],
 		local_crop_size_xyz=(3, 3, 3),
+		patch_size_xyz=(1, 1, 1),
 		samples_per_epoch=5,
 		zero_mask=ZeroMaskConfig(enabled=False),
 	)
@@ -128,6 +143,7 @@ def test_amplitude_dataset_zero_mask_uses_raw_amplitude_before_normalization(
 	dataset = NopimsAmplitudePretrainDataset(
 		[_manifest(tmp_path, 'survey', volume, median=10.0)],
 		local_crop_size_xyz=(5, 5, 5),
+		patch_size_xyz=(1, 1, 1),
 		zero_mask=ZeroMaskConfig(
 			z_sample_influence_radius=0,
 			xy_trace_influence_radius=0,
@@ -148,6 +164,7 @@ def test_amplitude_dataset_set_epoch_changes_coords_deterministically(
 	dataset = NopimsAmplitudePretrainDataset(
 		[_manifest(tmp_path, 'survey', np.ones((20, 20, 20), dtype=np.float32))],
 		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
 		seed=17,
 		zero_mask=ZeroMaskConfig(enabled=False),
 	)
@@ -169,6 +186,7 @@ def test_amplitude_dataset_rejects_manifest_smaller_than_crop(tmp_path: Path) ->
 		NopimsAmplitudePretrainDataset(
 			[manifest],
 			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(2, 2, 2),
 		)
 
 
@@ -177,6 +195,7 @@ def test_amplitude_dataset_respects_min_valid_fraction(tmp_path: Path) -> None:
 	dataset = NopimsAmplitudePretrainDataset(
 		[_manifest(tmp_path, 'survey', volume)],
 		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
 		zero_mask=ZeroMaskConfig(
 			z_sample_influence_radius=0,
 			xy_trace_influence_radius=0,
@@ -187,3 +206,57 @@ def test_amplitude_dataset_respects_min_valid_fraction(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='min_valid_fraction'):
 		dataset[0]
+
+
+def test_amplitude_dataset_masks_are_deterministic_for_seed_epoch_index(
+	tmp_path: Path,
+) -> None:
+	volume = np.ones((12, 12, 12), dtype=np.float32)
+	dataset = NopimsAmplitudePretrainDataset(
+		[_manifest(tmp_path, 'survey', volume)],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		seed=23,
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+
+	first = dataset[0]['spatial_mask']
+	second = dataset[0]['spatial_mask']
+
+	np.testing.assert_array_equal(first, second)
+
+
+def test_amplitude_dataset_from_config_uses_masking_settings(tmp_path: Path) -> None:
+	volume = np.ones((8, 8, 8), dtype=np.float32)
+	config = {
+		'data': {
+			'local_crop_size': [4, 4, 4],
+		},
+		'model': {
+			'patch_size': [2, 2, 2],
+		},
+		'masking': {
+			'spatial_mask_ratio': 0.5,
+			'spatial_mask_mode': 'block',
+			'block_size_tokens': [1, 1, 1],
+		},
+		'train': {
+			'seed': 11,
+			'samples_per_epoch': 3,
+		},
+		'zero_mask': {
+			'enabled': False,
+		},
+	}
+
+	dataset = NopimsAmplitudePretrainDataset.from_config(
+		[_manifest(tmp_path, 'survey', volume)],
+		config,
+	)
+	sample = dataset[0]
+
+	assert dataset.patch_size_xyz == (2, 2, 2)
+	assert dataset.block_size_tokens_xyz == (1, 1, 1)
+	assert len(dataset) == 3
+	assert sample['spatial_mask'].shape == (2, 2, 2)
+	assert float(sample['spatial_mask'].mean()) == 0.5
