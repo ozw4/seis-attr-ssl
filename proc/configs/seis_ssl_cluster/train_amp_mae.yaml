@@ -4,6 +4,7 @@ paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+  train_path_list: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
@@ -43,3 +44,13 @@ train:
   device: cuda
   seed: 42
   grad_clip_norm: 1.0
+visualization:
+  mae_debug:
+    enabled: false
+    every_steps: 1000
+    every_epochs: null
+    max_samples: 1
+    xy_slice_index: null
+    xz_slice_y_index: null
+    dpi: 160
+    clip_percentiles: [1.0, 99.0]

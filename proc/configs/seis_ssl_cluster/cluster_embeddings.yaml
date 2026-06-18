@@ -6,8 +6,16 @@ embeddings:
   input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
 clustering:
   output_dir: /workspace/artifacts/seis_ssl_cluster/clusters/nopims/pretrain_v1
-  algorithm: kmeans
-  num_clusters: 12
+  embedding_normalization: l2
+  pca:
+    enabled: true
+    n_components: 64
+    whiten: false
+  sample_tokens: 1000000
+  method: minibatch_kmeans
+  k_values: [6, 8, 10, 12]
+  minibatch_size: 8192
+  seed: 42
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
