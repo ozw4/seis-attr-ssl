@@ -145,3 +145,56 @@ train:
 	assert 'local_crop_size' in result.stderr
 	assert 'patch_size' in result.stderr
 	assert 'stage:' not in result.stdout
+
+
+def test_build_nopims_manifests_rejects_non_bare_output_name(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'escaped_output_name.yaml'
+	config_path.write_text(
+		"""
+stage: build_nopims_manifests
+paths:
+  nopims_root: /external/NOPIMS
+  artifact_root: /external/artifacts
+manifest:
+  input_path_list: /external/NOPIMS/inputs/train_npy_paths.txt
+  output_dir: /external/artifacts/registry/manifests
+  output_name: ../nopims_amplitude_manifests.json
+  normalization_stats_dir: /external/artifacts/registry/normalization_stats
+data:
+  grid_order: [x, y, z]
+  volume_format: npy_memmap
+  input_channels: 1
+  target_channels: 1
+  use_context: false
+  local_crop_size: [128, 128, 128]
+model:
+  name: amp_mae3d
+  in_channels: 1
+  out_channels: 1
+  patch_size: [8, 8, 8]
+masking:
+  spatial_mask_ratio: 0.75
+  spatial_mask_mode: block
+  block_size_tokens: [2, 2, 2]
+train:
+  batch_size: 4
+  samples_per_epoch: 10000
+  epochs: 100
+  num_workers: 8
+  amp: false
+""",
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_nopims_manifests.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode != 0
+	assert 'manifest.output_name must be a bare filename' in result.stderr
+	assert 'stage:' not in result.stdout

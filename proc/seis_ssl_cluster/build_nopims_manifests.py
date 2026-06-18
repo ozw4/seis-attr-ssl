@@ -76,6 +76,7 @@ def main() -> None:
 def _manifest_output_path(manifest_cfg: Mapping[str, Any]) -> Path:
 	output_dir = Path(_required_str(manifest_cfg, 'output_dir'))
 	output_name = _optional_str(manifest_cfg, 'output_name', DEFAULT_OUTPUT_NAME)
+	_require_bare_filename(output_name, 'manifest.output_name')
 	return output_dir / output_name
 
 
@@ -106,6 +107,20 @@ def _optional_str(parent: Mapping[str, object], key: str, default: str) -> str:
 def _require_absolute_path(path: Path, label: str) -> None:
 	if not path.is_absolute():
 		msg = f'{label} must be an absolute artifact-registry path; got {path}'
+		raise ValueError(msg)
+
+
+def _require_bare_filename(value: str, label: str) -> None:
+	path = Path(value)
+	if (
+		not value
+		or path.is_absolute()
+		or path.name != value
+		or value in {'.', '..'}
+		or '/' in value
+		or '\\' in value
+	):
+		msg = f'{label} must be a bare filename; got {value!r}'
 		raise ValueError(msg)
 
 
