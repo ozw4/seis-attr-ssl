@@ -87,10 +87,13 @@ def run_embedding_extraction(
 
 	payload = load_checkpoint(settings.checkpoint_path, map_location='cpu')
 	checkpoint_config = _checkpoint_config(payload, config)
+	model_state_dict = _model_state_dict(payload)
+	checkpoint_dtype = _checkpoint_floating_dtype(model_state_dict)
 	model = build_model_from_config(checkpoint_config)
-	model.load_state_dict(_model_state_dict(payload))
+	model.to(dtype=checkpoint_dtype)
+	model.load_state_dict(model_state_dict)
 	resolved_device = _resolve_device(device, config)
-	model.to(resolved_device)
+	model.to(device=resolved_device, dtype=checkpoint_dtype)
 	model.eval()
 
 	store = NpyMemmapVolumeStore()
@@ -331,13 +334,22 @@ def _process_window_batch(  # noqa: PLR0913
 	if not usable:
 		return
 
-	x = torch.from_numpy(np.stack([item[1] for item in usable], axis=0)).to(device)
+	x = torch.from_numpy(np.stack([item[1] for item in usable], axis=0)).to(
+		device=device,
+		dtype=_model_floating_dtype(model),
+	)
 	token_masks = torch.from_numpy(
 		np.stack([item[2] for item in usable], axis=0),
 	).to(device)
 	with torch.no_grad():
 		output = model.encode_tokens(x, valid_mask=token_masks)
-	tokens = cast('torch.Tensor', output['tokens']).detach().cpu().numpy()
+	tokens = (
+		cast('torch.Tensor', output['tokens'])
+		.detach()
+		.to(dtype=torch.float32)
+		.cpu()
+		.numpy()
+	)
 	window_token_shape = cast('tuple[int, int, int]', output['token_grid_shape'])
 	for index, (window, _x, token_valid) in enumerate(usable):
 		merger.add_window(
@@ -433,6 +445,34 @@ def _model_state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tenso
 		msg = 'checkpoint is missing model_state_dict'
 		raise TypeError(msg)
 	return cast('Mapping[str, torch.Tensor]', value)
+
+
+def _checkpoint_floating_dtype(
+	state_dict: Mapping[str, torch.Tensor],
+) -> torch.dtype:
+	dtypes = {
+		tensor.dtype
+		for tensor in state_dict.values()
+		if isinstance(tensor, torch.Tensor) and tensor.is_floating_point()
+	}
+	if not dtypes:
+		msg = 'checkpoint model_state_dict does not contain floating point tensors'
+		raise ValueError(msg)
+	if len(dtypes) != 1:
+		msg = f'checkpoint model_state_dict has multiple floating dtypes: {dtypes!r}'
+		raise ValueError(msg)
+	return next(iter(dtypes))
+
+
+def _model_floating_dtype(model: AmplitudeMAE3D) -> torch.dtype:
+	for parameter in model.parameters():
+		if parameter.is_floating_point():
+			return parameter.dtype
+	for buffer in model.buffers():
+		if buffer.is_floating_point():
+			return buffer.dtype
+	msg = 'model does not contain floating point tensors'
+	raise ValueError(msg)
 
 
 def _model_geometry(

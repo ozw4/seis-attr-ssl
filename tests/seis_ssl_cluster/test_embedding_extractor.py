@@ -60,6 +60,31 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 
 
+def test_embedding_extraction_uses_checkpoint_floating_dtype(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path, checkpoint_dtype=torch.bfloat16)
+	observed_dtypes: list[tuple[torch.dtype, torch.dtype]] = []
+	original_encode_tokens = AmplitudeMAE3D.encode_tokens
+
+	def wrapped_encode_tokens(
+		self: AmplitudeMAE3D,
+		x: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
+		observed_dtypes.append((next(self.parameters()).dtype, x.dtype))
+		return original_encode_tokens(self, x, valid_mask=valid_mask)
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', wrapped_encode_tokens)
+
+	run_embedding_extraction(config, device='cpu')
+
+	assert observed_dtypes
+	assert set(observed_dtypes) == {(torch.bfloat16, torch.bfloat16)}
+
+
 def test_embedding_extraction_skip_existing_uses_matching_metadata(
 	tmp_path: Path,
 ) -> None:
@@ -102,7 +127,11 @@ def test_embedding_extraction_rejects_complete_output_metadata_mismatch(
 		run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 
-def _write_fixture(tmp_path: Path) -> dict[str, object]:
+def _write_fixture(
+	tmp_path: Path,
+	*,
+	checkpoint_dtype: torch.dtype = torch.float32,
+) -> dict[str, object]:
 	survey_root = tmp_path / 'survey-a'
 	survey_root.mkdir()
 	volume_path = survey_root / 'amplitude.npy'
@@ -163,6 +192,7 @@ def _write_fixture(tmp_path: Path) -> dict[str, object]:
 		decoder_depth=1,
 		decoder_heads=3,
 	)
+	model.to(dtype=checkpoint_dtype)
 	torch.save(
 		{
 			'model_state_dict': model.state_dict(),

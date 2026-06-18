@@ -79,6 +79,15 @@ def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
 	assert snapshot.read_text(encoding='utf-8') == 'survey/amplitude.npy\n'
 
 
+def test_run_rejects_missing_configured_train_path_list(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	missing = tmp_path / 'missing_train_paths.txt'
+	cfg['manifests']['train_path_list'] = str(missing)
+
+	with pytest.raises(FileNotFoundError, match=r'manifests\.train_path_list'):
+		run_mae_pretraining(cfg)
+
+
 def test_fresh_run_rejects_existing_snapshot_files(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	output_root = _path_like(cfg['paths']['output_root'])

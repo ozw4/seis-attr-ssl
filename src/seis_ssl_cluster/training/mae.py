@@ -932,7 +932,7 @@ def _snapshot_run_inputs(
 	manifest_path = _manifest_train_path(config)
 	_copy_snapshot(manifest_path, output_root / 'manifest.json', overwrite=overwrite)
 	path_list = _configured_path_list(config)
-	if path_list is not None and path_list.is_file():
+	if path_list is not None:
 		inputs_dir = output_root / 'inputs'
 		inputs_dir.mkdir(parents=True, exist_ok=True)
 		_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
@@ -975,7 +975,13 @@ def _configured_path_list(config: Mapping[str, object]) -> Path | None:
 			f'configured; got {path_value!r}'
 		)
 		raise ValueError(msg)
-	return Path(path_value)
+	path = Path(path_value)
+	if not path.is_file():
+		msg = _manifest_path_error(
+			f'manifests.train_path_list does not exist: {path}',
+		)
+		raise FileNotFoundError(msg)
+	return path
 
 
 def _git_commit() -> str | None:
