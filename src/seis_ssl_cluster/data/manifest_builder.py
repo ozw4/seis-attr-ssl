@@ -85,6 +85,12 @@ def scan_nopims_amplitude_manifests_from_path_list(
 			f'got {stats_dir}'
 		)
 		raise ValueError(msg)
+	if _is_relative_to(stats_dir, root):
+		msg = (
+			'normalization_stats_dir must not be under nopims_root; '
+			f'got {stats_dir}'
+		)
+		raise ValueError(msg)
 	paths = resolve_npy_path_list(input_path_list, root)
 
 	manifests: list[SurveyManifest] = []
@@ -130,6 +136,14 @@ def summarize_manifests(
 		amplitude_volume_count=len(manifests),
 		output_path=output_path,
 	)
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+	try:
+		path.resolve(strict=False).relative_to(root.resolve(strict=False))
+	except ValueError:
+		return False
+	return True
 
 
 __all__ = [

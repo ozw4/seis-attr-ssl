@@ -53,6 +53,9 @@ def main() -> None:
 	"""Compute missing NOPIMS normalization stats sidecars."""
 	args = _parse_args()
 	config = validate_config(load_config(args.config))
+	paths = _required_mapping(config, 'paths')
+	artifact_root = Path(_required_str(paths, 'artifact_root'))
+	nopims_root = Path(_required_str(paths, 'nopims_root'))
 	manifest_path = _manifest_path(config)
 	normalization_cfg = _required_mapping(config, 'normalization')
 	clip_low, clip_high = _optional_percentiles(normalization_cfg)
@@ -79,7 +82,14 @@ def main() -> None:
 		raise FileNotFoundError(msg)
 
 	manifests = read_manifest_json(manifest_path)
-	targets = [_normalization_target(manifest) for manifest in manifests]
+	targets = [
+		_normalization_target(
+			manifest,
+			artifact_root=artifact_root,
+			nopims_root=nopims_root,
+		)
+		for manifest in manifests
+	]
 	if not args.overwrite:
 		_validate_existing_stats(targets)
 	existing_count = sum(target.output_path.is_file() for target in targets)
@@ -152,7 +162,12 @@ def _manifest_path(config: Mapping[str, object]) -> Path:
 	return Path(_required_str(manifests, 'train'))
 
 
-def _normalization_target(manifest: SurveyManifest) -> NormalizationTarget:
+def _normalization_target(
+	manifest: SurveyManifest,
+	*,
+	artifact_root: Path,
+	nopims_root: Path,
+) -> NormalizationTarget:
 	amplitude = manifest.amplitude
 	if not amplitude.path.is_file():
 		msg = f'amplitude.path does not exist: {amplitude.path}'
@@ -171,11 +186,32 @@ def _normalization_target(manifest: SurveyManifest) -> NormalizationTarget:
 			f'{output_path}'
 		)
 		raise ValueError(msg)
+	if _is_relative_to(output_path, nopims_root):
+		msg = (
+			'amplitude.normalization_stats_path must not be under '
+			f'paths.nopims_root for {manifest.survey_id!r}; got {output_path}'
+		)
+		raise ValueError(msg)
+	if not _is_relative_to(output_path, artifact_root):
+		msg = (
+			'amplitude.normalization_stats_path must be under '
+			f'paths.artifact_root ({artifact_root}) for {manifest.survey_id!r}; '
+			f'got {output_path}'
+		)
+		raise ValueError(msg)
 	return NormalizationTarget(
 		survey_id=manifest.survey_id,
 		amplitude=amplitude,
 		output_path=output_path,
 	)
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+	try:
+		path.resolve(strict=False).relative_to(root.resolve(strict=False))
+	except ValueError:
+		return False
+	return True
 
 
 def _validate_existing_stats(targets: list[NormalizationTarget]) -> None:

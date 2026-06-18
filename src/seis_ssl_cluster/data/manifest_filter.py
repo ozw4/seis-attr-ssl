@@ -52,7 +52,7 @@ def filter_manifests_by_stats_qc(
 
 	items = tuple(
 		evaluate_normalization_stats_file(
-			_stats_path_for_manifest(manifest),
+			_stats_path_for_manifest(manifest, nopims_root),
 			survey_id=manifest.survey_id,
 			source_path=manifest.amplitude.path,
 			grid_order=manifest.amplitude.grid_order,
@@ -106,15 +106,32 @@ def _survey_id_from_path_entry(
 	return make_survey_id_from_path(path, root)
 
 
-def _stats_path_for_manifest(manifest: SurveyManifest) -> Path:
+def _stats_path_for_manifest(
+	manifest: SurveyManifest,
+	nopims_root: str | Path,
+) -> Path:
 	stats_path = manifest.amplitude.normalization_stats_path
-	if stats_path.is_absolute():
-		return stats_path
-	msg = (
-		'amplitude.normalization_stats_path must be an absolute '
-		f'artifact-registry path for {manifest.survey_id!r}; got {stats_path}'
-	)
-	raise ValueError(msg)
+	if not stats_path.is_absolute():
+		msg = (
+			'amplitude.normalization_stats_path must be an absolute '
+			f'artifact-registry path for {manifest.survey_id!r}; got {stats_path}'
+		)
+		raise ValueError(msg)
+	if _is_relative_to(stats_path, Path(nopims_root)):
+		msg = (
+			'amplitude.normalization_stats_path must not be under nopims_root '
+			f'for {manifest.survey_id!r}; got {stats_path}'
+		)
+		raise ValueError(msg)
+	return stats_path
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+	try:
+		path.resolve(strict=False).relative_to(root.resolve(strict=False))
+	except ValueError:
+		return False
+	return True
 
 
 __all__ = [

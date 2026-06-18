@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from numbers import Integral, Real
+from pathlib import Path
 from typing import TypeAlias, TypeVar
 
 from seis_ssl_cluster.config.schema import (
@@ -28,7 +29,25 @@ def validate_config(config: _T) -> _T:
 		raise TypeError(msg)
 
 	_reject_legacy_attribute_config(config)
-	_validate_stage(config)
+	stage = _validate_stage(config)
+
+	paths = _required_mapping(config, 'paths')
+	artifact_root = _validate_absolute_path(
+		paths,
+		'artifact_root',
+		prefix='paths',
+	)
+	nopims_root = _validate_absolute_path(
+		paths,
+		'nopims_root',
+		prefix='paths',
+	)
+	_validate_generated_metadata_paths(
+		config,
+		stage,
+		artifact_root=artifact_root,
+		nopims_root=nopims_root,
+	)
 
 	data = _required_mapping(config, 'data')
 	_validate_equal(data, 'grid_order', EXPECTED_GRID_ORDER, prefix='data')
@@ -81,6 +100,102 @@ def _reject_legacy_attribute_config(config: Mapping[str, object]) -> None:
 				'configuration from this config.'
 			)
 			raise ValueError(msg)
+
+
+def _validate_generated_metadata_paths(
+	config: Mapping[str, object],
+	stage: str,
+	*,
+	artifact_root: Path,
+	nopims_root: Path,
+) -> None:
+	if stage == 'build_nopims_manifests':
+		manifest = _required_mapping(config, 'manifest')
+		_validate_artifact_output_path(
+			_validate_path(manifest, 'output_dir', prefix='manifest'),
+			'manifest.output_dir',
+			artifact_root=artifact_root,
+			nopims_root=nopims_root,
+		)
+		_validate_artifact_output_path(
+			_validate_path(
+				manifest,
+				'normalization_stats_dir',
+				prefix='manifest',
+			),
+			'manifest.normalization_stats_dir',
+			artifact_root=artifact_root,
+			nopims_root=nopims_root,
+		)
+	elif stage == 'filter_manifest_by_normalization_qc':
+		manifests = _required_mapping(config, 'manifests')
+		splits = _required_mapping(config, 'splits')
+		qc = _required_mapping(config, 'qc')
+		for parent, key, prefix in (
+			(manifests, 'output', 'manifests'),
+			(splits, 'output', 'splits'),
+			(qc, 'output_json', 'qc'),
+			(qc, 'excluded_surveys', 'qc'),
+		):
+			label = f'{prefix}.{key}'
+			_validate_artifact_output_path(
+				_validate_path(parent, key, prefix=prefix),
+				label,
+				artifact_root=artifact_root,
+				nopims_root=nopims_root,
+			)
+
+
+def _validate_absolute_path(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> Path:
+	path = _validate_path(parent, key, prefix=prefix)
+	if not path.is_absolute():
+		msg = f'{prefix}.{key} must be an absolute path; got {path}'
+		raise ValueError(msg)
+	return path
+
+
+def _validate_path(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> Path:
+	value = parent.get(key)
+	if not isinstance(value, str) or not value:
+		msg = f'{prefix}.{key} must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	return Path(value)
+
+
+def _validate_artifact_output_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+	nopims_root: Path,
+) -> None:
+	if not path.is_absolute():
+		msg = f'{label} must be an absolute artifact-registry path; got {path}'
+		raise ValueError(msg)
+	if _is_relative_to(path, nopims_root):
+		msg = f'{label} must not be under paths.nopims_root; got {path}'
+		raise ValueError(msg)
+	if not _is_relative_to(path, artifact_root):
+		msg = f'{label} must be under paths.artifact_root ({artifact_root}); got {path}'
+		raise ValueError(msg)
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+	try:
+		path.resolve(strict=False).relative_to(root.resolve(strict=False))
+	except ValueError:
+		return False
+	return True
 
 
 def _iter_mapping_keys(

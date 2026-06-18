@@ -117,6 +117,17 @@ def test_scan_path_list_rejects_relative_normalization_stats_dir(
 		)
 
 
+def test_scan_path_list_rejects_normalization_stats_dir_under_source(
+	tmp_path: Path,
+) -> None:
+	with pytest.raises(ValueError, match=r'normalization_stats_dir.*nopims_root'):
+		scan_nopims_amplitude_manifests_from_path_list(
+			tmp_path / 'NOPIMS',
+			tmp_path / 'missing_paths.txt',
+			tmp_path / 'NOPIMS' / 'normalization_stats',
+		)
+
+
 def test_scan_path_list_rejects_non_numeric_and_non_3d_arrays(
 	tmp_path: Path,
 ) -> None:
@@ -151,13 +162,14 @@ def test_build_nopims_manifests_cli_writes_amplitude_manifest(
 	nopims_root = tmp_path / 'NOPIMS'
 	volume = _write_volume(nopims_root / 'survey_a' / 'base.npy')
 	path_list = _write_path_list(tmp_path / 'paths.txt', [str(volume)])
-	output_dir = tmp_path / 'manifests'
-	stats_dir = tmp_path / 'stats'
+	artifact_root = tmp_path / 'artifacts'
+	output_dir = artifact_root / 'registry' / 'manifests'
+	stats_dir = artifact_root / 'registry' / 'normalization_stats'
 	config = {
 		'stage': 'build_nopims_manifests',
 		'paths': {
 			'nopims_root': str(nopims_root),
-			'artifact_root': str(tmp_path / 'artifacts'),
+			'artifact_root': str(artifact_root),
 		},
 		'manifest': {
 			'input_path_list': str(path_list),

@@ -132,5 +132,29 @@ def test_paths_outside_repo_are_allowed(tmp_path: Path) -> None:
 	validate_config(cfg)
 
 
+def test_build_manifest_stats_dir_under_nopims_root_is_rejected() -> None:
+	cfg = load_config(CONFIG_DIR / 'build_nopims_manifests.yaml')
+	cfg['manifest']['normalization_stats_dir'] = (
+		'/home/dcuser/data/NOPIMS/registry/normalization_stats'
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r'manifest\.normalization_stats_dir.*paths\.nopims_root',
+	):
+		validate_config(cfg)
+
+
+def test_filter_qc_output_outside_artifact_root_is_rejected() -> None:
+	cfg = load_config(CONFIG_DIR / 'filter_manifest_by_normalization_qc.yaml')
+	cfg['qc']['output_json'] = '/external/qc/normalization_stats_qc.json'
+
+	with pytest.raises(
+		ValueError,
+		match=r'qc\.output_json.*paths\.artifact_root',
+	):
+		validate_config(cfg)
+
+
 def _valid_config() -> dict[str, object]:
 	return deepcopy(load_config(CONFIG_DIR / 'train_amp_mae.yaml'))

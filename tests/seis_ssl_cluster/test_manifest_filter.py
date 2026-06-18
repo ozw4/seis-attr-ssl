@@ -223,10 +223,31 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 	_write_stats(manifest)
 	manifest_path = tmp_path / 'manifest.json'
 	write_manifest_json([manifest], manifest_path)
-	clean_manifest = tmp_path / 'clean_manifest.json'
-	clean_split = tmp_path / 'clean_split.txt'
-	qc_json = tmp_path / 'qc' / 'normalization_stats_qc.json'
-	excluded = tmp_path / 'qc' / 'excluded_surveys.txt'
+	artifact_root = tmp_path / 'artifacts'
+	clean_manifest = (
+		artifact_root
+		/ 'registry'
+		/ 'manifests'
+		/ 'nopims'
+		/ 'pretrain_v1_clean'
+		/ 'nopims_amplitude_manifests.json'
+	)
+	clean_split = (
+		artifact_root
+		/ 'registry'
+		/ 'splits'
+		/ 'nopims'
+		/ 'pretrain_v1_clean'
+		/ 'train_npy_paths.txt'
+	)
+	qc_json = (
+		artifact_root
+		/ 'registry'
+		/ 'qc'
+		/ 'nopims'
+		/ 'pretrain_v1'
+		/ 'normalization_stats_qc.json'
+	)
 	config = _base_config('filter_manifest_by_normalization_qc', nopims_root)
 	config['manifests'] = {
 		'input': str(manifest_path),
@@ -238,7 +259,7 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 	}
 	config['qc'] = {
 		'output_json': str(qc_json),
-		'excluded_surveys': str(excluded),
+		'excluded_surveys': str(qc_json.parent / 'excluded_surveys.txt'),
 	}
 	config_path = tmp_path / 'filter.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')

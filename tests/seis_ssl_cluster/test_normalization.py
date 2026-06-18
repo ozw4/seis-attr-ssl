@@ -167,22 +167,49 @@ def test_prepare_nopims_normalization_stats_dry_run_reports_counts(
 	assert 'normalization_stats.compute: skipped' in result.stdout
 
 
+def test_prepare_nopims_normalization_stats_rejects_stats_outside_artifact_root(
+	tmp_path: Path,
+) -> None:
+	manifest_path, config_path, _, source_paths = _write_prepare_inputs(tmp_path)
+	write_manifest_json(
+		[
+			_manifest(
+				'survey-a',
+				source_paths[0],
+				tmp_path / 'outside' / 'survey-a.normalization_stats.json',
+			),
+		],
+		manifest_path,
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py'),
+		'--config',
+		config_path,
+	)
+
+	assert result.returncode != 0
+	assert 'paths.artifact_root' in result.stderr
+
+
 def _write_prepare_inputs(
 	tmp_path: Path,
 ) -> tuple[Path, Path, list[Path], list[Path]]:
+	nopims_root = tmp_path / 'NOPIMS'
+	artifact_root = tmp_path / 'artifacts'
 	first_path = _write_volume(
-		tmp_path / 'NOPIMS' / 'survey-a' / 'base.npy',
+		nopims_root / 'survey-a' / 'base.npy',
 		np.arange(8, dtype=np.float32).reshape((2, 2, 2)),
 	)
 	second_path = _write_volume(
-		tmp_path / 'NOPIMS' / 'survey-b' / 'base.npy',
+		nopims_root / 'survey-b' / 'base.npy',
 		np.arange(8, 16, dtype=np.float32).reshape((2, 2, 2)),
 	)
 	stats_paths = [
-		tmp_path / 'artifacts' / 'registry' / 'normalization_stats' / 'a.json',
-		tmp_path / 'artifacts' / 'registry' / 'normalization_stats' / 'b.json',
+		artifact_root / 'registry' / 'normalization_stats' / 'a.json',
+		artifact_root / 'registry' / 'normalization_stats' / 'b.json',
 	]
-	manifest_path = tmp_path / 'artifacts' / 'registry' / 'manifests' / 'm.json'
+	manifest_path = artifact_root / 'registry' / 'manifests' / 'm.json'
 	manifest_path.parent.mkdir(parents=True, exist_ok=True)
 	write_manifest_json(
 		[
@@ -191,7 +218,11 @@ def _write_prepare_inputs(
 		],
 		manifest_path,
 	)
-	config = _base_config('prepare_nopims_normalization_stats')
+	config = _base_config(
+		'prepare_nopims_normalization_stats',
+		nopims_root=nopims_root,
+		artifact_root=artifact_root,
+	)
 	config['manifests'] = {'train': str(manifest_path)}
 	config['normalization'] = {
 		'clipping_percentiles': [0.5, 99.5],
@@ -247,12 +278,17 @@ def _stats(
 	)
 
 
-def _base_config(stage: str) -> dict[str, object]:
+def _base_config(
+	stage: str,
+	*,
+	nopims_root: str | Path = '/unused',
+	artifact_root: str | Path = '/unused',
+) -> dict[str, object]:
 	return {
 		'stage': stage,
 		'paths': {
-			'nopims_root': '/unused',
-			'artifact_root': '/unused',
+			'nopims_root': str(nopims_root),
+			'artifact_root': str(artifact_root),
 		},
 		'data': {
 			'grid_order': ['x', 'y', 'z'],
