@@ -43,3 +43,13 @@ train:
   device: cuda
   seed: 42
   grad_clip_norm: 1.0
+visualization:
+  mae_debug:
+    enabled: false
+    every_steps: 1000
+    every_epochs: null
+    max_samples: 1
+    xy_slice_index: null
+    xz_slice_y_index: null
+    dpi: 160
+    clip_percentiles: [1.0, 99.0]
