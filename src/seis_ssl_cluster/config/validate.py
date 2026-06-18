@@ -246,8 +246,10 @@ def _validate_masking(masking: Mapping[str, object]) -> None:
 
 
 def _validate_train(train: Mapping[str, object]) -> None:
-	for key in ('batch_size', 'samples_per_epoch', 'epochs', 'num_workers'):
+	for key in ('batch_size', 'samples_per_epoch', 'epochs'):
 		_validate_positive_int(train, key, prefix='train')
+	if 'num_workers' in train:
+		_validate_nonnegative_int(train, 'num_workers', prefix='train')
 	for key in ('lr', 'weight_decay', 'grad_clip_norm'):
 		if key in train:
 			_validate_positive_number(train, key, prefix='train')
@@ -337,6 +339,18 @@ def _validate_positive_int(
 	value = parent.get(key)
 	if not _is_int(value) or int(value) <= 0:
 		msg = f'{prefix}.{key} must be a positive integer; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_nonnegative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	value = parent.get(key)
+	if not _is_int(value) or int(value) < 0:
+		msg = f'{prefix}.{key} must be a nonnegative integer; got {value!r}'
 		raise ValueError(msg)
 
 

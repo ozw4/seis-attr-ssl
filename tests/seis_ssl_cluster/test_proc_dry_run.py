@@ -47,6 +47,8 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 		'proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py',
 	):
 		assert 'normalization_qc.compute: skipped' in result.stdout
+	elif script_path == Path('proc/seis_ssl_cluster/train_amp_mae.py'):
+		assert 'execution: dry-run; training skipped' in result.stdout
 	else:
 		assert 'execution: dry-run; implementation pending' in result.stdout
 
