@@ -51,7 +51,7 @@ def main() -> None:
 	config = validate_config(load_config(args.config))
 	if args.dry_run:
 		print_config_summary(config)
-		print('execution: dry-run; implementation pending')
+		print('execution: dry-run; extraction skipped')
 		return
 
 	results = run_embedding_extraction(

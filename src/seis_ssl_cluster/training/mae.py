@@ -19,6 +19,7 @@ from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import (
+	capture_rng_state,
 	load_checkpoint,
 	restore_rng_state,
 	save_checkpoint,
@@ -320,6 +321,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			scaler=scaler,
 			amp_enabled=amp_enabled,
 		)
+		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
 		if resume_state.skip_batches >= len(dataloader):
 			resume_state = ResumeState(
 				start_epoch=resume_state.start_epoch + 1,
@@ -349,6 +351,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
 			set_epoch(epoch - 1)
+		epoch_start_dataloader_rng_state = _dataloader_generator_state(dataloader)
 		remaining_steps = None
 		if max_steps is not None:
 			remaining_steps = max_steps - state.global_step
@@ -360,7 +363,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			else 0
 		)
 
-		def save_step_checkpoint(step_state: MaeStepState) -> None:
+		def save_step_checkpoint(
+			step_state: MaeStepState,
+			epoch_start_rng_state: torch.Tensor = epoch_start_dataloader_rng_state,
+		) -> None:
 			nonlocal checkpoint_path
 			if (
 				checkpoint_every_steps is None
@@ -379,6 +385,11 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 				scaler=scaler,
 				checkpoint_kind='step',
 				batch_index=step_state.batch_index,
+				rng_state=_rng_state_for_step_checkpoint(
+					dataloader=dataloader,
+					epoch_start_dataloader_rng_state=epoch_start_rng_state,
+					batch_index=step_state.batch_index,
+				),
 			)
 
 		state = train_mae_one_epoch(
@@ -415,6 +426,15 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			scaler=scaler,
 			checkpoint_kind=checkpoint_kind,
 			batch_index=None if state.completed_epoch else state.last_batch_index,
+			rng_state=(
+				_rng_state_with_dataloader(dataloader)
+				if state.completed_epoch
+				else _rng_state_for_step_checkpoint(
+					dataloader=dataloader,
+					epoch_start_dataloader_rng_state=epoch_start_dataloader_rng_state,
+					batch_index=state.last_batch_index,
+				)
+			),
 		)
 		if max_steps is not None and state.global_step >= max_steps:
 			break
@@ -464,6 +484,7 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None,
 	checkpoint_kind: Literal['step', 'epoch'],
 	batch_index: int | None,
+	rng_state: Mapping[str, object] | None = None,
 ) -> Path:
 	checkpoint_path = save_checkpoint(
 		path,
@@ -482,6 +503,7 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 			'checkpoint_kind': checkpoint_kind,
 			'batch_index': batch_index,
 		},
+		rng_state=rng_state,
 	)
 	_latest_path = checkpoint_path.parent / 'mae_latest.pt'
 	_tmp_latest = _latest_path.with_suffix('.pt.tmp')
@@ -529,6 +551,64 @@ def _restore_mae_checkpoint(
 		global_step=int(payload.get('global_step', 0)),
 		skip_batches=0,
 	)
+
+
+def _rng_state_for_step_checkpoint(
+	*,
+	dataloader: torch.utils.data.DataLoader,
+	epoch_start_dataloader_rng_state: torch.Tensor,
+	batch_index: int,
+) -> dict[str, object]:
+	if batch_index >= len(dataloader) - 1:
+		return _rng_state_with_dataloader(dataloader)
+	return _rng_state_with_dataloader(
+		dataloader,
+		dataloader_generator_state=epoch_start_dataloader_rng_state,
+	)
+
+
+def _rng_state_with_dataloader(
+	dataloader: torch.utils.data.DataLoader,
+	*,
+	dataloader_generator_state: torch.Tensor | None = None,
+) -> dict[str, object]:
+	rng_state = capture_rng_state()
+	rng_state['dataloader_generator'] = (
+		_dataloader_generator_state(dataloader)
+		if dataloader_generator_state is None
+		else dataloader_generator_state.clone()
+	)
+	return rng_state
+
+
+def _dataloader_generator_state(
+	dataloader: torch.utils.data.DataLoader,
+) -> torch.Tensor:
+	generator = getattr(dataloader, 'generator', None)
+	if not isinstance(generator, torch.Generator):
+		msg = 'MAE dataloader must expose a torch.Generator for deterministic resume'
+		raise TypeError(msg)
+	return generator.get_state().clone()
+
+
+def _restore_dataloader_generator_state(
+	*,
+	payload: Mapping[str, object],
+	dataloader: torch.utils.data.DataLoader,
+) -> None:
+	rng_state = payload['rng_state']
+	if not isinstance(rng_state, Mapping):
+		msg = 'resume checkpoint rng_state must be a mapping'
+		raise TypeError(msg)
+	generator_state = rng_state['dataloader_generator']
+	if not isinstance(generator_state, torch.Tensor):
+		msg = 'resume checkpoint rng_state.dataloader_generator must be a tensor'
+		raise TypeError(msg)
+	generator = getattr(dataloader, 'generator', None)
+	if not isinstance(generator, torch.Generator):
+		msg = 'MAE dataloader must expose a torch.Generator for deterministic resume'
+		raise TypeError(msg)
+	generator.set_state(generator_state.cpu())
 
 
 def _mae_debug_visualization_config(
@@ -702,10 +782,13 @@ def _validate_resume_rng_state(payload: Mapping[str, object]) -> None:
 	if not isinstance(rng_state, Mapping):
 		msg = 'resume checkpoint rng_state must be a mapping'
 		raise TypeError(msg)
-	for key in ('python', 'numpy', 'torch'):
+	for key in ('python', 'numpy', 'torch', 'dataloader_generator'):
 		if key not in rng_state:
 			msg = f'resume checkpoint rng_state is missing {key}'
 			raise ValueError(msg)
+	if not isinstance(rng_state['dataloader_generator'], torch.Tensor):
+		msg = 'resume checkpoint rng_state.dataloader_generator must be a tensor'
+		raise TypeError(msg)
 
 
 def _checkpoint_stage(payload: Mapping[str, object]) -> object | None:

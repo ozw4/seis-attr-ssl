@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -49,8 +50,48 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 		assert 'normalization_qc.compute: skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/train_amp_mae.py'):
 		assert 'execution: dry-run; training skipped' in result.stdout
+	elif script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
+		assert 'execution: dry-run; extraction skipped' in result.stdout
+	elif script_path == Path('proc/seis_ssl_cluster/cluster_embeddings.py'):
+		assert 'execution: dry-run; clustering skipped' in result.stdout
 	else:
 		assert 'execution: dry-run; implementation pending' in result.stdout
+
+
+def test_cluster_embeddings_dry_run_does_not_import_optional_cluster_stack(
+	tmp_path: Path,
+) -> None:
+	sitecustomize = tmp_path / 'sitecustomize.py'
+	sitecustomize.write_text(
+		"""
+import builtins
+
+_original_import = builtins.__import__
+
+
+def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name.split('.')[0] in {'joblib', 'sklearn'}:
+        raise ModuleNotFoundError(name)
+    return _original_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = _guarded_import
+""",
+		encoding='utf-8',
+	)
+	pythonpath = str(tmp_path)
+	existing_pythonpath = os.environ.get('PYTHONPATH')
+	if existing_pythonpath:
+		pythonpath = f'{pythonpath}{os.pathsep}{existing_pythonpath}'
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/cluster_embeddings.py'),
+		'--dry-run',
+		extra_env={'PYTHONPATH': pythonpath},
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'execution: dry-run; clustering skipped' in result.stdout
 
 
 def test_proc_script_rejects_legacy_attribute_config(tmp_path: Path) -> None:

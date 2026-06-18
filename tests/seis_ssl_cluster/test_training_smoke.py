@@ -60,6 +60,7 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert checkpoint['training_state']['checkpoint_kind'] == 'epoch'
 	assert checkpoint['training_state']['stage'] == 'train_amp_mae'
 	assert checkpoint['package_version'] is None
+	assert isinstance(checkpoint['rng_state']['dataloader_generator'], torch.Tensor)
 	assert np.isfinite(checkpoint['metrics']['loss'])
 	assert (_path_like(cfg['paths']['output_root']) / 'resolved_config.json').is_file()
 	assert (_path_like(cfg['paths']['output_root']) / 'manifest.json').is_file()
@@ -104,6 +105,54 @@ def test_step_checkpoint_resume_continues_unfinished_epoch(tmp_path: Path) -> No
 	assert payload['global_step'] == 2
 
 
+def test_shuffle_step_resume_matches_uninterrupted_training_stream(
+	tmp_path: Path,
+) -> None:
+	full_cfg = _tiny_config(tmp_path / 'full')
+	full_cfg['train']['shuffle'] = True
+	full_cfg['train']['samples_per_epoch'] = 4
+	full_cfg['train']['max_steps'] = 3
+
+	resume_cfg = _tiny_config(tmp_path / 'resume')
+	resume_cfg['train']['shuffle'] = True
+	resume_cfg['train']['samples_per_epoch'] = 4
+	resume_cfg['train']['max_steps'] = 1
+	resume_cfg['train']['checkpoint_every_steps'] = 1
+
+	full_checkpoint = run_mae_pretraining(full_cfg)
+	step_checkpoint = run_mae_pretraining(resume_cfg)
+	resume_cfg['train']['max_steps'] = 3
+	resumed_checkpoint = run_mae_pretraining(resume_cfg, resume=step_checkpoint)
+
+	_assert_model_states_equal(
+		load_checkpoint(full_checkpoint, map_location='cpu')['model_state_dict'],
+		load_checkpoint(resumed_checkpoint, map_location='cpu')['model_state_dict'],
+	)
+
+
+def test_shuffle_epoch_resume_matches_uninterrupted_training_stream(
+	tmp_path: Path,
+) -> None:
+	full_cfg = _tiny_config(tmp_path / 'full')
+	full_cfg['train']['shuffle'] = True
+	full_cfg['train']['samples_per_epoch'] = 3
+	full_cfg['train']['epochs'] = 2
+
+	resume_cfg = _tiny_config(tmp_path / 'resume')
+	resume_cfg['train']['shuffle'] = True
+	resume_cfg['train']['samples_per_epoch'] = 3
+
+	full_checkpoint = run_mae_pretraining(full_cfg)
+	epoch_checkpoint = run_mae_pretraining(resume_cfg)
+	resume_cfg['train']['epochs'] = 2
+	resumed_checkpoint = run_mae_pretraining(resume_cfg, resume=epoch_checkpoint)
+
+	_assert_model_states_equal(
+		load_checkpoint(full_checkpoint, map_location='cpu')['model_state_dict'],
+		load_checkpoint(resumed_checkpoint, map_location='cpu')['model_state_dict'],
+	)
+
+
 def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	checkpoint_path = run_mae_pretraining(cfg)
@@ -129,6 +178,15 @@ def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 
 		with pytest.raises(ValueError, match=key):
 			run_mae_pretraining(cfg, resume=partial_path)
+
+	partial_path = tmp_path / 'missing-dataloader-rng.pt'
+	partial_payload = dict(payload)
+	partial_payload['rng_state'] = dict(payload['rng_state'])
+	partial_payload['rng_state'].pop('dataloader_generator')
+	torch.save(partial_payload, partial_path)
+
+	with pytest.raises(ValueError, match='dataloader_generator'):
+		run_mae_pretraining(cfg, resume=partial_path)
 
 
 def test_amp_resume_requires_scaler_state(tmp_path: Path) -> None:
@@ -355,3 +413,14 @@ def _path_like(value: object) -> Path:
 		msg = f'expected path string; got {value!r}'
 		raise TypeError(msg)
 	return Path(value)
+
+
+def _assert_model_states_equal(
+	left: object,
+	right: object,
+) -> None:
+	assert isinstance(left, dict)
+	assert isinstance(right, dict)
+	assert set(left) == set(right)
+	for key in left:
+		torch.testing.assert_close(left[key], right[key])

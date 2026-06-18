@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from argparse import ArgumentParser
 from pathlib import Path
@@ -10,7 +11,6 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.clustering import run_embedding_clustering  # noqa: E402
 from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
 from seis_ssl_cluster.utils.cli import print_config_summary  # noqa: E402
 
@@ -41,8 +41,12 @@ def main() -> None:
 	config = validate_config(load_config(args.config))
 	if args.dry_run:
 		print_config_summary(config)
-		print('execution: dry-run; implementation pending')
+		print('execution: dry-run; clustering skipped')
 		return
+
+	run_embedding_clustering = importlib.import_module(
+		'seis_ssl_cluster.clustering.kmeans',
+	).run_embedding_clustering
 
 	result = run_embedding_clustering(config)
 	for k_result in result.results:
