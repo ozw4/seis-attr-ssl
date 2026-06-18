@@ -58,6 +58,24 @@ def test_manifest_json_round_trip_preserves_amplitude_record(
 	assert 'base_seismic_kind' not in str(payload[0])
 
 
+def test_manifest_rejects_relative_normalization_stats_path() -> None:
+	payload = {
+		'survey_id': 'survey',
+		'root': '/source/NOPIMS/survey',
+		'amplitude': {
+			'survey_id': 'survey',
+			'path': '/source/NOPIMS/survey/base.npy',
+			'shape_xyz': [8, 9, 10],
+			'dtype': 'float32',
+			'grid_order': ['x', 'y', 'z'],
+			'normalization_stats_path': 'stats/survey.normalization_stats.json',
+		},
+	}
+
+	with pytest.raises(ValueError, match=r'normalization_stats_path.*absolute'):
+		survey_manifest_from_dict(payload)
+
+
 def test_scan_path_list_preserves_order_and_places_stats_outside_source(
 	tmp_path: Path,
 ) -> None:
@@ -86,6 +104,17 @@ def test_scan_path_list_preserves_order_and_places_stats_outside_source(
 			f'{manifest.survey_id}.normalization_stats.json'
 		)
 		assert nopims_root not in manifest.amplitude.normalization_stats_path.parents
+
+
+def test_scan_path_list_rejects_relative_normalization_stats_dir(
+	tmp_path: Path,
+) -> None:
+	with pytest.raises(ValueError, match=r'normalization_stats_dir.*absolute'):
+		scan_nopims_amplitude_manifests_from_path_list(
+			tmp_path / 'NOPIMS',
+			tmp_path / 'missing_paths.txt',
+			Path('relative_stats'),
+		)
 
 
 def test_scan_path_list_rejects_non_numeric_and_non_3d_arrays(

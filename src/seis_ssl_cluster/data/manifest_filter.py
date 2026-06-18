@@ -110,7 +110,11 @@ def _stats_path_for_manifest(manifest: SurveyManifest) -> Path:
 	stats_path = manifest.amplitude.normalization_stats_path
 	if stats_path.is_absolute():
 		return stats_path
-	return manifest.root / stats_path
+	msg = (
+		'amplitude.normalization_stats_path must be an absolute '
+		f'artifact-registry path for {manifest.survey_id!r}; got {stats_path}'
+	)
+	raise ValueError(msg)
 
 
 __all__ = [

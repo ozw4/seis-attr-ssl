@@ -42,6 +42,13 @@ class AmplitudeVolumeRecord:
 				f'{self.normalization_stats_path}'
 			)
 			raise ValueError(msg)
+		if not self.normalization_stats_path.is_absolute():
+			msg = (
+				'amplitude.normalization_stats_path must be an absolute '
+				'artifact-registry path; got '
+				f'{self.normalization_stats_path}'
+			)
+			raise ValueError(msg)
 
 
 @dataclass(frozen=True)

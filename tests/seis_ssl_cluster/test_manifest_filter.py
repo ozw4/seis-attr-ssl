@@ -203,6 +203,62 @@ def test_filter_manifests_by_stats_qc_preserves_clean_split_order_and_duplicates
 	]
 
 
+def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
+	tmp_path: Path,
+) -> None:
+	nopims_root = tmp_path / 'NOPIMS'
+	volume = _write_volume(
+		nopims_root / 'survey' / 'base.npy',
+		np.arange(8, dtype=np.float32).reshape((2, 2, 2)),
+	)
+	source_split = tmp_path / 'source_split.txt'
+	source_split.write_text('survey/base.npy\n', encoding='utf-8')
+	survey_id = make_survey_id_from_path(volume, nopims_root)
+	manifest = _manifest(
+		nopims_root,
+		volume,
+		survey_id,
+		tmp_path / 'artifacts' / 'registry' / 'normalization_stats',
+	)
+	_write_stats(manifest)
+	manifest_path = tmp_path / 'manifest.json'
+	write_manifest_json([manifest], manifest_path)
+	clean_manifest = tmp_path / 'clean_manifest.json'
+	clean_split = tmp_path / 'clean_split.txt'
+	qc_json = tmp_path / 'qc' / 'normalization_stats_qc.json'
+	excluded = tmp_path / 'qc' / 'excluded_surveys.txt'
+	config = _base_config('filter_manifest_by_normalization_qc', nopims_root)
+	config['manifests'] = {
+		'input': str(manifest_path),
+		'output': str(clean_manifest),
+	}
+	config['splits'] = {
+		'input': str(source_split),
+		'output': str(clean_split),
+	}
+	config['qc'] = {
+		'output_json': str(qc_json),
+		'excluded_surveys': str(excluded),
+	}
+	config_path = tmp_path / 'filter.yaml'
+	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'stage: filter_manifest_by_normalization_qc' in result.stdout
+	assert 'data.input_channels: 1' in result.stdout
+	assert 'normalization_qc.write: false' in result.stdout
+	assert not qc_json.exists()
+	assert not clean_manifest.exists()
+	assert not clean_split.exists()
+
+
 def _write_volume(path: Path, values: np.ndarray) -> Path:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	np.save(path, values)

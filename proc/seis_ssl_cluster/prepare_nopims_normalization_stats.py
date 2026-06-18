@@ -165,7 +165,12 @@ def _normalization_target(manifest: SurveyManifest) -> NormalizationTarget:
 		raise ValueError(msg)
 	output_path = amplitude.normalization_stats_path
 	if not output_path.is_absolute():
-		output_path = manifest.root / output_path
+		msg = (
+			'amplitude.normalization_stats_path must be an absolute '
+			f'artifact-registry path for {manifest.survey_id!r}; got '
+			f'{output_path}'
+		)
+		raise ValueError(msg)
 	return NormalizationTarget(
 		survey_id=manifest.survey_id,
 		amplitude=amplitude,

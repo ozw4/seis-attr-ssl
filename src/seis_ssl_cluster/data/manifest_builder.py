@@ -79,6 +79,12 @@ def scan_nopims_amplitude_manifests_from_path_list(
 	"""Build amplitude manifests from a user-maintained `.npy` path-list."""
 	root = Path(nopims_root)
 	stats_dir = Path(normalization_stats_dir)
+	if not stats_dir.is_absolute():
+		msg = (
+			'normalization_stats_dir must be an absolute artifact-registry path; '
+			f'got {stats_dir}'
+		)
+		raise ValueError(msg)
 	paths = resolve_npy_path_list(input_path_list, root)
 
 	manifests: list[SurveyManifest] = []

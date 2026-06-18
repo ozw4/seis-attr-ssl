@@ -46,6 +46,10 @@ def main() -> None:
 	normalization_stats_dir = Path(
 		_required_str(manifest_cfg, 'normalization_stats_dir'),
 	)
+	_require_absolute_path(
+		normalization_stats_dir,
+		'manifest.normalization_stats_dir',
+	)
 
 	if args.dry_run:
 		print_config_summary(config)
@@ -97,6 +101,12 @@ def _optional_str(parent: Mapping[str, object], key: str, default: str) -> str:
 		msg = f'{key} must be a string; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _require_absolute_path(path: Path, label: str) -> None:
+	if not path.is_absolute():
+		msg = f'{label} must be an absolute artifact-registry path; got {path}'
+		raise ValueError(msg)
 
 
 def _print_manifest_target(

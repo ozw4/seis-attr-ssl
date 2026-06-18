@@ -56,9 +56,11 @@ def main() -> None:
 	excluded_surveys_path = _excluded_surveys_path(config)
 	thresholds = _qc_thresholds(config)
 
+	if args.dry_run:
+		print_config_summary(config)
+
 	if not manifest_path.is_file() or not split_path.is_file():
 		if args.dry_run:
-			print_config_summary(config)
 			print(f'normalization_qc.manifest_path: {manifest_path}')
 			print(
 				'normalization_qc.manifest_exists: '
