@@ -6,8 +6,13 @@ clustering:
   input_dir: /workspace/artifacts/seis_ssl_cluster/runs/clusters/nopims/pretrain_v1
 visualization:
   output_dir: /workspace/artifacts/seis_ssl_cluster/runs/figures/clusters/nopims/pretrain_v1
-  modes: [token, voxel]
-  reconstruct_voxel: true
+  survey_ids: []
+  modes: [token]
+  reconstruct_voxel: false
+  allow_all_surveys_for_voxel_reconstruction: false
+  skip_existing_voxel_labels: true
+  max_voxel_output_gib: 50.0
+  allow_large_voxel_output: false
   slice_coordinate_space: voxel
   xy_slices: [750]
   xz_slices: [150]

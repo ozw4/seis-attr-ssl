@@ -35,6 +35,15 @@ class _SurveyGeometry:
 	volume_shape_xyz: XYZ
 
 
+@dataclass(frozen=True)
+class _LabelArtifact:
+	k: int
+	k_dir: Path
+	survey_id: str
+	token_path: Path
+	metadata_path: Path
+
+
 def main() -> None:
 	"""Run amplitude-only cluster visualization or print a dry-run summary."""
 	parser = ArgumentParser(description='Visualize amplitude-only clusters.')
@@ -65,7 +74,7 @@ def main() -> None:
 	)
 
 
-def run_cluster_visualization(  # noqa: C901, PLR0915
+def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 	config: Mapping[str, object],
 ) -> dict[str, int]:
 	"""Run cluster-map reconstruction, summaries, and configured PNG rendering."""
@@ -79,6 +88,23 @@ def run_cluster_visualization(  # noqa: C901, PLR0915
 	reconstruct_voxel = _bool(
 		visualization.get('reconstruct_voxel', False),
 		'visualization.reconstruct_voxel',
+	)
+	requested_survey_ids = _survey_ids(visualization.get('survey_ids', []))
+	allow_all_reconstruction = _bool(
+		visualization.get('allow_all_surveys_for_voxel_reconstruction', False),
+		'visualization.allow_all_surveys_for_voxel_reconstruction',
+	)
+	skip_existing_voxel_labels = _bool(
+		visualization.get('skip_existing_voxel_labels', True),
+		'visualization.skip_existing_voxel_labels',
+	)
+	max_voxel_output_gib = _nonnegative_float(
+		visualization.get('max_voxel_output_gib', 50.0),
+		'visualization.max_voxel_output_gib',
+	)
+	allow_large_voxel_output = _bool(
+		visualization.get('allow_large_voxel_output', False),
+		'visualization.allow_large_voxel_output',
 	)
 	modes = _modes(visualization.get('modes', ['token']))
 	slice_request = clusters.ClusterSliceRequest(
@@ -108,16 +134,33 @@ def run_cluster_visualization(  # noqa: C901, PLR0915
 		summary_cfg.get('include_amplitude_norm', False),
 		'visualization.summaries.include_amplitude_norm',
 	)
+	artifacts = _filter_label_artifacts(
+		_discover_label_artifacts(input_dir),
+		requested_survey_ids=requested_survey_ids,
+	)
+	if reconstruct_voxel and not requested_survey_ids and not allow_all_reconstruction:
+		msg = (
+			'visualization.reconstruct_voxel with an empty survey_ids list would '
+			'reconstruct every discovered survey; set visualization.survey_ids '
+			'or visualization.allow_all_surveys_for_voxel_reconstruction: true'
+		)
+		raise ValueError(msg)
+	if reconstruct_voxel:
+		_validate_voxel_output_estimate(
+			artifacts,
+			max_gib=max_voxel_output_gib,
+			allow_large=allow_large_voxel_output,
+		)
 
 	png_count = 0
 	voxel_count = 0
 	summary_count = 0
-	for k_dir in _label_k_dirs(input_dir):
-		k = int(k_dir.name.removeprefix('k'))
+	for k, k_artifacts in _artifacts_by_k(artifacts).items():
 		summary_inputs = []
-		for token_path in sorted(k_dir.glob('*.cluster_labels_token.npy')):
-			survey_id = token_path.name.removesuffix('.cluster_labels_token.npy')
-			metadata_path = k_dir / f'{survey_id}.cluster_label_metadata.json'
+		for artifact in k_artifacts:
+			survey_id = artifact.survey_id
+			token_path = artifact.token_path
+			metadata_path = artifact.metadata_path
 			metadata = _load_metadata(metadata_path)
 			embedding_metadata = _embedding_metadata(metadata)
 			embedding_input = metadata.get('embedding_input')
@@ -181,21 +224,30 @@ def run_cluster_visualization(  # noqa: C901, PLR0915
 						dpi=dpi,
 					),
 				)
-			voxel_path = k_dir / f'{survey_id}.cluster_labels_voxel.npy'
-			if reconstruct_voxel or 'voxel' in modes:
+			voxel_path = artifact.k_dir / f'{survey_id}.cluster_labels_voxel.npy'
+			if reconstruct_voxel:
 				if geometry is None:
 					msg = 'internal error: voxel reconstruction requires geometry'
 					raise RuntimeError(msg)
-				reconstruct.reconstruct_labels_for_survey(
+				reconstructed = reconstruct.reconstruct_labels_for_survey(
 					token_path,
 					metadata_path=metadata_path,
 					write_voxel_labels=True,
+					skip_existing_voxel_labels=skip_existing_voxel_labels,
 				)
-				voxel_count += 1
+				if not reconstructed.skipped_existing_voxel_labels:
+					voxel_count += 1
 			if 'voxel' in modes:
 				if geometry is None:
 					msg = 'internal error: voxel visualization requires geometry'
 					raise RuntimeError(msg)
+				if not voxel_path.is_file():
+					msg = (
+						f'voxel visualization requested for survey {survey_id!r} '
+						f'at k={k}, but voxel labels do not exist: {voxel_path}; '
+						'set visualization.reconstruct_voxel: true to create them'
+					)
+					raise FileNotFoundError(msg)
 				voxel_slices = _voxel_slice_request(
 					slice_request,
 					geometry=geometry,
@@ -222,6 +274,9 @@ def run_cluster_visualization(  # noqa: C901, PLR0915
 				k=k,
 				output_dir=output_dir / f'k{k}',
 				include_amplitude_norm=include_amplitude,
+				selected_survey_ids=(
+					requested_survey_ids if requested_survey_ids else None
+				),
 			)
 			summary_count += 1
 	return {
@@ -229,6 +284,92 @@ def run_cluster_visualization(  # noqa: C901, PLR0915
 		'voxel_count': voxel_count,
 		'summary_count': summary_count,
 	}
+
+
+def _discover_label_artifacts(input_dir: Path) -> list[_LabelArtifact]:
+	artifacts = []
+	for k_dir in _label_k_dirs(input_dir):
+		k = int(k_dir.name.removeprefix('k'))
+		for token_path in sorted(k_dir.glob('*.cluster_labels_token.npy')):
+			survey_id = token_path.name.removesuffix('.cluster_labels_token.npy')
+			artifacts.append(
+				_LabelArtifact(
+					k=k,
+					k_dir=k_dir,
+					survey_id=survey_id,
+					token_path=token_path,
+					metadata_path=k_dir / f'{survey_id}.cluster_label_metadata.json',
+				),
+			)
+	if not artifacts:
+		msg = f'no token label files found under {input_dir / "labels"}'
+		raise ValueError(msg)
+	return artifacts
+
+
+def _filter_label_artifacts(
+	artifacts: Sequence[_LabelArtifact],
+	*,
+	requested_survey_ids: tuple[str, ...],
+) -> list[_LabelArtifact]:
+	if not requested_survey_ids:
+		return list(artifacts)
+	known = {artifact.survey_id for artifact in artifacts}
+	missing = sorted(set(requested_survey_ids) - known)
+	if missing:
+		examples = ', '.join(sorted(known)[:10])
+		msg = (
+			'unknown visualization.survey_ids requested: '
+			f'{missing!r}; discovered survey IDs include: {examples}'
+		)
+		raise ValueError(msg)
+	requested = set(requested_survey_ids)
+	return [artifact for artifact in artifacts if artifact.survey_id in requested]
+
+
+def _artifacts_by_k(
+	artifacts: Sequence[_LabelArtifact],
+) -> dict[int, list[_LabelArtifact]]:
+	grouped: dict[int, list[_LabelArtifact]] = {}
+	for artifact in artifacts:
+		grouped.setdefault(artifact.k, []).append(artifact)
+	return dict(sorted(grouped.items()))
+
+
+def _validate_voxel_output_estimate(
+	artifacts: Sequence[_LabelArtifact],
+	*,
+	max_gib: float,
+	allow_large: bool,
+) -> None:
+	file_count = 0
+	byte_count = 0
+	for artifact in artifacts:
+		labels = np.load(artifact.token_path, mmap_mode='r')
+		metadata = _embedding_metadata(_load_metadata(artifact.metadata_path))
+		geometry = _required_survey_geometry(
+			metadata,
+			token_shape_xyz=labels.shape,
+			survey_id=artifact.survey_id,
+		)
+		byte_count += (
+			int(np.prod(geometry.volume_shape_xyz, dtype=np.int64))
+			* np.dtype(np.int32).itemsize
+		)
+		file_count += 1
+	gib = byte_count / (1024.0**3)
+	print(
+		'voxel reconstruction estimate: '
+		f'{file_count} file(s), {byte_count} bytes ({gib:.2f} GiB)',
+	)
+	if byte_count > max_gib * (1024.0**3) and not allow_large:
+		msg = (
+			'estimated voxel label output is '
+			f'{gib:.2f} GiB, exceeding '
+			f'visualization.max_voxel_output_gib={max_gib:g}; set '
+			'visualization.allow_large_voxel_output: true to proceed'
+		)
+		raise ValueError(msg)
 
 
 def _label_k_dirs(input_dir: Path) -> list[Path]:
@@ -637,6 +778,22 @@ def _modes(value: object) -> tuple[str, ...]:
 	return modes
 
 
+def _survey_ids(value: object) -> tuple[str, ...]:
+	if value is None:
+		return ()
+	if not isinstance(value, Sequence) or isinstance(value, str):
+		msg = 'visualization.survey_ids must be a sequence of strings'
+		raise TypeError(msg)
+	if any(not isinstance(item, str) for item in value):
+		msg = 'visualization.survey_ids must be a sequence of strings'
+		raise TypeError(msg)
+	survey_ids = tuple(value)
+	if any(not item for item in survey_ids):
+		msg = 'visualization.survey_ids entries must be non-empty strings'
+		raise ValueError(msg)
+	return survey_ids
+
+
 def _bool(value: object, name: str) -> bool:
 	if not isinstance(value, bool):
 		msg = f'{name} must be a boolean; got {value!r}'
@@ -660,6 +817,17 @@ def _fraction(value: object, name: str) -> float:
 		msg = f'{name} must be in [0, 1]; got {value!r}'
 		raise ValueError(msg)
 	return fraction
+
+
+def _nonnegative_float(value: object, name: str) -> float:
+	if not isinstance(value, int | float) or isinstance(value, bool):
+		msg = f'{name} must be a number; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if number < 0.0:
+		msg = f'{name} must be non-negative; got {value!r}'
+		raise ValueError(msg)
+	return number
 
 
 if __name__ == '__main__':

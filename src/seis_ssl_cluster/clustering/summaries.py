@@ -45,6 +45,7 @@ def write_cluster_summaries(
 	k: int,
 	output_dir: str | Path,
 	include_amplitude_norm: bool = False,
+	selected_survey_ids: Sequence[str] | None = None,
 ) -> ClusterSummaryArtifacts:
 	"""Write CSV, PNG, and JSON summaries for a k-cluster label set."""
 	if k <= 0:
@@ -85,6 +86,12 @@ def write_cluster_summaries(
 			'total_valid_token_count': total_valid,
 			'total_invalid_token_count': int(accumulator['invalid_count']),
 			'survey_count': len(inputs),
+			'survey_ids': [item.survey_id for item in inputs],
+			'selected_survey_ids': (
+				list(selected_survey_ids)
+				if selected_survey_ids is not None
+				else None
+			),
 			'clusters': rows,
 		},
 	)
