@@ -67,17 +67,25 @@ def reconstruct_voxel_labels(
 			dtype=np.int32,
 			shape=volume_shape,
 		)
-	upsampled = (
-		labels.astype(np.int32, copy=False)
-		.repeat(patch[0], axis=0)
-		.repeat(patch[1], axis=1)
-		.repeat(patch[2], axis=2)
+	token_limits = cast(
+		'XYZ',
+		tuple(
+			_min_token_count(volume_axis, patch_axis)
+			for volume_axis, patch_axis in zip(volume_shape, patch, strict=True)
+		),
 	)
-	voxels[...] = upsampled[
-		: volume_shape[0],
-		: volume_shape[1],
-		: volume_shape[2],
-	]
+	for token_x in range(token_limits[0]):
+		x_start = token_x * patch[0]
+		x_stop = min(x_start + patch[0], volume_shape[0])
+		for token_y in range(token_limits[1]):
+			y_start = token_y * patch[1]
+			y_stop = min(y_start + patch[1], volume_shape[1])
+			for token_z in range(token_limits[2]):
+				z_start = token_z * patch[2]
+				z_stop = min(z_start + patch[2], volume_shape[2])
+				voxels[x_start:x_stop, y_start:y_stop, z_start:z_stop] = np.int32(
+					labels[token_x, token_y, token_z],
+				)
 	if hasattr(voxels, 'flush'):
 		voxels.flush()
 	return voxels
@@ -203,6 +211,10 @@ def _validate_positive_xyz(value: Sequence[int], name: str) -> XYZ:
 		msg = f'{name} values must be positive; got {xyz!r}'
 		raise ValueError(msg)
 	return xyz
+
+
+def _min_token_count(volume_axis: int, patch_axis: int) -> int:
+	return (volume_axis + patch_axis - 1) // patch_axis
 
 
 __all__ = [

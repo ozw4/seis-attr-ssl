@@ -117,3 +117,21 @@ def test_proc_visualization_writes_token_and_voxel_modes_separately(
 	assert (output_dir / 'token' / 'survey_k2_xz_y0.png').is_file()
 	assert (output_dir / 'voxel' / 'survey_k2_xy_z1.png').is_file()
 	assert (output_dir / 'voxel' / 'survey_k2_xz_y0.png').is_file()
+
+
+@pytest.mark.parametrize('slice_value', [1.9, True])
+def test_proc_visualization_rejects_non_integer_slice_values(
+	tmp_path: Path,
+	slice_value: object,
+) -> None:
+	with pytest.raises(TypeError, match=r'visualization\.xy_slices'):
+		run_cluster_visualization(
+			{
+				'clustering': {'input_dir': str(tmp_path / 'cluster_run')},
+				'visualization': {
+					'output_dir': str(tmp_path / 'figures'),
+					'xy_slices': [slice_value],
+					'xz_slices': [0],
+				},
+			},
+		)

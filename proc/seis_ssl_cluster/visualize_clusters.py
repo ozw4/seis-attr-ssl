@@ -7,6 +7,7 @@ import json
 import sys
 from argparse import ArgumentParser
 from collections.abc import Mapping, Sequence
+from numbers import Integral
 from pathlib import Path
 
 import numpy as np
@@ -265,6 +266,9 @@ def _int_tuple(value: object, name: str) -> tuple[int, ...]:
 	if value is None:
 		return ()
 	if not isinstance(value, Sequence) or isinstance(value, str):
+		msg = f'visualization.{name} must be a sequence of integers'
+		raise TypeError(msg)
+	if any(isinstance(item, bool) or not isinstance(item, Integral) for item in value):
 		msg = f'visualization.{name} must be a sequence of integers'
 		raise TypeError(msg)
 	return tuple(int(item) for item in value)
