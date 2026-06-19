@@ -6,6 +6,18 @@ clustering:
   input_dir: /workspace/artifacts/seis_ssl_cluster/clusters/nopims/pretrain_v1
 visualization:
   output_dir: /workspace/artifacts/seis_ssl_cluster/figures/clusters/nopims/pretrain_v1
+  modes: [token, voxel]
+  reconstruct_voxel: true
+  xy_slices: [32]
+  xz_slices: [64]
+  dpi: 160
+  invalid_color: lightgray
+  amplitude_underlay:
+    enabled: false
+    alpha: 0.35
+  summaries:
+    enabled: true
+    include_amplitude_norm: false
 data:
   grid_order: [x, y, z]
   volume_format: npy_memmap
