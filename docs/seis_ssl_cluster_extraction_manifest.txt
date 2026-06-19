@@ -1,0 +1,23 @@
+# Seis SSL Cluster extraction manifest
+
+README.md
+pyproject.toml
+ruff.toml
+pytest.ini
+
+docs/seis_ssl_cluster_mvp_spec.md
+docs/seis_ssl_cluster_runbook.md
+docs/seis_ssl_cluster_artifact_layout.md
+docs/seis_ssl_cluster_extraction_manifest.txt
+
+src/seis_ssl_cluster/
+proc/seis_ssl_cluster/
+proc/configs/seis_ssl_cluster/
+tests/seis_ssl_cluster/
+tools/check_seis_ssl_cluster_isolation.py
+
+# pyproject dependency changes to reproduce later:
+# - project dependencies: numpy, PyYAML, torch
+# - dev extra: pytest, ruff
+# - cluster extra: scikit-learn, joblib
+# - visualization extra: matplotlib

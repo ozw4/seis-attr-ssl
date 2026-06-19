@@ -1,0 +1,47 @@
+# Seis SSL Cluster Artifact Layout
+
+Recommended root:
+
+```text
+/workspace/artifacts/seis_ssl_cluster/
+├── registry/
+└── runs/
+```
+
+## Registry
+
+`registry/` contains canonical reusable inputs:
+
+```text
+registry/
+├── splits/nopims/pretrain_v1/train_npy_paths.txt
+├── splits/nopims/pretrain_v1_clean/train_npy_paths.txt
+├── manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
+├── manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+├── normalization_stats/nopims/pretrain_v1/*.normalization_stats.json
+└── qc/nopims/pretrain_v1/
+    ├── normalization_stats_qc.json
+    └── excluded_surveys.txt
+```
+
+The path-list, manifests, stats, QC report, and clean split are canonical. They
+should be treated as inputs to any run that follows.
+
+## Runs
+
+`runs/` contains derived outputs:
+
+```text
+runs/
+├── smoke_amp_mae/
+├── pilot_amp_mae_1000/
+├── embeddings/nopims/pretrain_v1/
+├── clusters/nopims/pretrain_v1/
+└── figures/clusters/nopims/pretrain_v1/
+```
+
+Training run directories contain `resolved_config.json`, `manifest.json`,
+`run_metadata.json`, optional `inputs/` snapshots, checkpoints, and metrics.
+Embedding, clustering, voxel-label, summary, and visualization outputs are
+derived artifacts and can be regenerated from the canonical registry inputs and
+checkpoint reference.

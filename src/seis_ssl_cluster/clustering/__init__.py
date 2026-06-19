@@ -16,9 +16,20 @@ from seis_ssl_cluster.clustering.features import (
 	open_embedding_array,
 	valid_flat_indices,
 )
+from seis_ssl_cluster.clustering.reconstruct import (
+	ReconstructedLabels,
+	reconstruct_labels_for_survey,
+	reconstruct_voxel_labels,
+	resolve_volume_shape_xyz,
+)
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
 	sample_valid_embedding_tokens,
+)
+from seis_ssl_cluster.clustering.summaries import (
+	ClusterSummaryArtifacts,
+	ClusterSummaryInput,
+	write_cluster_summaries,
 )
 
 _KMEANS_EXPORTS = {
@@ -39,12 +50,15 @@ _WRITER_EXPORTS = {
 }
 
 __all__ = [
+	'ClusterSummaryArtifacts',
+	'ClusterSummaryInput',
 	'ClusteringRunResult',
 	'ClusteringSettings',
 	'EmbeddingInput',
 	'FeatureBatch',
 	'KClusteringResult',
 	'PCASettings',
+	'ReconstructedLabels',
 	'SampledTokens',
 	'SurveyLabelResult',
 	'clustering_settings_from_config',
@@ -59,9 +73,13 @@ __all__ = [
 	'iter_valid_feature_batches',
 	'load_valid_tokens',
 	'open_embedding_array',
+	'reconstruct_labels_for_survey',
+	'reconstruct_voxel_labels',
+	'resolve_volume_shape_xyz',
 	'run_embedding_clustering',
 	'sample_valid_embedding_tokens',
 	'valid_flat_indices',
+	'write_cluster_summaries',
 	'write_json',
 	'write_labels_for_k',
 	'write_model_artifacts',

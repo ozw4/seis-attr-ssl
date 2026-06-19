@@ -55,7 +55,7 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	elif script_path == Path('proc/seis_ssl_cluster/cluster_embeddings.py'):
 		assert 'execution: dry-run; clustering skipped' in result.stdout
 	else:
-		assert 'execution: dry-run; implementation pending' in result.stdout
+		assert 'execution: dry-run; visualization skipped' in result.stdout
 
 
 def test_cluster_embeddings_dry_run_does_not_import_optional_cluster_stack(
