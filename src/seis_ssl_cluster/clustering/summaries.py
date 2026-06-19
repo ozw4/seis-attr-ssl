@@ -194,11 +194,16 @@ def _add_amplitude_norms(
 		)
 		if patch_values.size == 0:
 			continue
-		normalized = normalize_amplitude(patch_values, stats)
-		value = float(np.mean(normalized))
-		accumulator['amplitude_sum'][label] += value
-		accumulator['amplitude_sumsq'][label] += value * value
-		accumulator['amplitude_count'][label] += 1
+		normalized = normalize_amplitude(patch_values, stats).astype(
+			np.float64,
+			copy=False,
+		)
+		values = normalized[np.isfinite(normalized)]
+		if values.size == 0:
+			continue
+		accumulator['amplitude_sum'][label] += float(values.sum())
+		accumulator['amplitude_sumsq'][label] += float(np.dot(values, values))
+		accumulator['amplitude_count'][label] += int(values.size)
 
 
 def _summary_rows(

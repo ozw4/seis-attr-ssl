@@ -80,14 +80,30 @@ def save_cluster_slice_pngs(  # noqa: PLR0913
 
 def stable_cluster_colors(k: int, *, invalid_color: str = 'lightgray') -> object:
 	"""Return a discrete colormap with stable label-to-color mapping."""
+	return _cluster_colors(
+		k,
+		invalid_color=invalid_color,
+		cluster_alpha=1.0,
+		name=f'clusters_k{k}',
+	)
+
+
+def _cluster_colors(
+	k: int,
+	*,
+	invalid_color: str,
+	cluster_alpha: float,
+	name: str,
+) -> object:
 	if k <= 0:
 		msg = f'k must be positive; got {k!r}'
 		raise ValueError(msg)
+	alpha = _validate_alpha(cluster_alpha)
 	color_module = _matplotlib_colors()
 	colors = [color_module.to_rgba(invalid_color)]
 	base = _plt().get_cmap('tab20', max(k, 1))
-	colors.extend(base(index) for index in range(k))
-	return color_module.ListedColormap(colors, name=f'clusters_k{k}')
+	colors.extend((*base(index)[:3], alpha) for index in range(k))
+	return color_module.ListedColormap(colors, name=name)
 
 
 def _save_one_slice(  # noqa: PLR0913
@@ -109,7 +125,9 @@ def _save_one_slice(  # noqa: PLR0913
 	label_slice = slice_image(labels, view=view, slice_index=slice_index)
 	display_labels = np.where(label_slice < 0, 0, label_slice + 1)
 	fig, ax = plt.subplots(figsize=(5.0, 4.2), dpi=dpi)
+	underlay_alpha = None
 	if amplitude is not None:
+		underlay_alpha = _validate_alpha(amplitude_alpha)
 		amp_slice = slice_image(amplitude, view=view, slice_index=slice_index)
 		vmin, vmax = _robust_limits(amp_slice)
 		ax.imshow(
@@ -117,11 +135,19 @@ def _save_one_slice(  # noqa: PLR0913
 			cmap='gray',
 			origin='lower',
 			interpolation='none',
-			alpha=amplitude_alpha,
 			vmin=vmin,
 			vmax=vmax,
 		)
-	cmap = stable_cluster_colors(k, invalid_color=invalid_color)
+	cmap = (
+		stable_cluster_colors(k, invalid_color=invalid_color)
+		if underlay_alpha is None
+		else _cluster_colors(
+			k,
+			invalid_color=invalid_color,
+			cluster_alpha=1.0 - underlay_alpha,
+			name=f'clusters_k{k}_underlay',
+		)
+	)
 	norm = _matplotlib_colors().BoundaryNorm(
 		np.arange(-0.5, k + 1.5, 1.0),
 		k + 1,
@@ -182,6 +208,14 @@ def _robust_limits(image: np.ndarray) -> tuple[float | None, float | None]:
 	if np.isclose(vmin, vmax):
 		return None, None
 	return float(vmin), float(vmax)
+
+
+def _validate_alpha(value: float) -> float:
+	alpha = float(value)
+	if not 0.0 <= alpha <= 1.0:
+		msg = f'alpha must be in [0, 1]; got {value!r}'
+		raise ValueError(msg)
+	return alpha
 
 
 def _plt() -> object:

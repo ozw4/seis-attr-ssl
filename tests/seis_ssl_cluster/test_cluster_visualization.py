@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 	from pathlib import Path
 
 
-pytest.importorskip('matplotlib')
+plt = pytest.importorskip('matplotlib.pyplot')
 
 
 def test_xy_and_xz_cluster_pngs_are_created(tmp_path: Path) -> None:
@@ -42,6 +42,36 @@ def test_xy_and_xz_cluster_pngs_are_created(tmp_path: Path) -> None:
 		'survey_k3_xz_y1.png',
 	]
 	assert all(path.is_file() and path.stat().st_size > 0 for path in created)
+
+
+def test_amplitude_underlay_changes_visible_cluster_pixels(tmp_path: Path) -> None:
+	labels = np.zeros((4, 4, 1), dtype=np.int32)
+	flat = np.linspace(-1.0, 1.0, labels.size, dtype=np.float32)
+	first_amplitude = np.zeros_like(labels, dtype=np.float32)
+	second_amplitude = flat.reshape(labels.shape)
+
+	first = save_cluster_slice_pngs(
+		labels,
+		survey_id='survey',
+		k=1,
+		mode='voxel',
+		output_dir=tmp_path / 'first',
+		slices=ClusterSliceRequest(xy_slices=(0,)),
+		amplitude=first_amplitude,
+		amplitude_alpha=0.65,
+	)[0]
+	second = save_cluster_slice_pngs(
+		labels,
+		survey_id='survey',
+		k=1,
+		mode='voxel',
+		output_dir=tmp_path / 'second',
+		slices=ClusterSliceRequest(xy_slices=(0,)),
+		amplitude=second_amplitude,
+		amplitude_alpha=0.65,
+	)[0]
+
+	assert not np.array_equal(plt.imread(first), plt.imread(second))
 
 
 def test_cluster_colormap_is_stable_for_same_k() -> None:

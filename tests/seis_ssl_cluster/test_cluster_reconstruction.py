@@ -4,6 +4,7 @@ import json
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from seis_ssl_cluster.clustering.reconstruct import (
 	reconstruct_labels_for_survey,
@@ -12,6 +13,11 @@ from seis_ssl_cluster.clustering.reconstruct import (
 from seis_ssl_cluster.clustering.summaries import (
 	ClusterSummaryInput,
 	write_cluster_summaries,
+)
+from seis_ssl_cluster.data.normalization import (
+	SurveyNormalizationStats,
+	normalize_amplitude,
+	write_normalization_stats,
 )
 
 if TYPE_CHECKING:
@@ -115,3 +121,58 @@ def test_cluster_summary_counts_equal_valid_assigned_tokens(tmp_path: Path) -> N
 	assert [row['token_count'] for row in payload['clusters']] == [1, 2, 3]
 	assert artifacts.csv_path.is_file()
 	assert artifacts.png_path.is_file()
+
+
+def test_cluster_summary_amplitude_std_uses_patch_voxels(tmp_path: Path) -> None:
+	labels_path = tmp_path / 'survey.cluster_labels_token.npy'
+	metadata_path = tmp_path / 'survey.cluster_label_metadata.json'
+	amplitude_path = tmp_path / 'survey.npy'
+	stats_path = tmp_path / 'survey.normalization_stats.json'
+	volume = np.arange(8, dtype=np.float32).reshape(2, 2, 2)
+	stats = SurveyNormalizationStats(
+		survey_id='survey',
+		source_path=amplitude_path,
+		grid_order=('x', 'y', 'z'),
+		clip_low_percentile=0.0,
+		clip_high_percentile=100.0,
+		clip_low=0.0,
+		clip_high=7.0,
+		median=0.0,
+		iqr=1.0,
+		eps=1.0e-6,
+	)
+	np.save(labels_path, np.array([[[0]]], dtype=np.int32))
+	np.save(amplitude_path, volume)
+	write_normalization_stats(stats, stats_path)
+	metadata_path.write_text(
+		json.dumps(
+			{
+				'source_amplitude_path': str(amplitude_path),
+				'normalization_stats_path': str(stats_path),
+				'patch_size': [2, 2, 2],
+				'volume_shape_xyz': [2, 2, 2],
+			},
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
+
+	artifacts = write_cluster_summaries(
+		[
+			ClusterSummaryInput(
+				survey_id='survey',
+				labels_path=labels_path,
+				metadata_path=metadata_path,
+			),
+		],
+		k=1,
+		output_dir=tmp_path / 'summary',
+		include_amplitude_norm=True,
+	)
+
+	payload = json.loads(artifacts.json_path.read_text(encoding='utf-8'))
+	cluster = payload['clusters'][0]
+	expected = normalize_amplitude(volume, stats)
+	assert cluster['token_count'] == 1
+	assert cluster['mean_amplitude_norm'] == pytest.approx(float(np.mean(expected)))
+	assert cluster['std_amplitude_norm'] == pytest.approx(float(np.std(expected)))
