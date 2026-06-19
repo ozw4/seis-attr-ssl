@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from typing import TYPE_CHECKING
 
@@ -119,7 +120,23 @@ def test_cluster_summary_counts_equal_valid_assigned_tokens(tmp_path: Path) -> N
 	assert payload['total_valid_token_count'] == 6
 	assert payload['total_invalid_token_count'] == 2
 	assert [row['token_count'] for row in payload['clusters']] == [1, 2, 3]
-	assert artifacts.csv_path.is_file()
+	with artifacts.csv_path.open(encoding='utf-8', newline='') as file_obj:
+		csv_rows = list(csv.DictReader(file_obj))
+	assert csv_rows[0].keys() == {
+		'cluster',
+		'token_count',
+		'valid_fraction',
+		'mean_amplitude_norm',
+		'std_amplitude_norm',
+		'mean_embedding_norm',
+		'survey_coverage_count',
+		'survey_coverage_fraction',
+	}
+	assert [int(row['token_count']) for row in csv_rows] == [1, 2, 3]
+	assert [float(row['mean_embedding_norm']) for row in csv_rows] == pytest.approx(
+		[float(np.sqrt(3.0))] * 3,
+	)
+	assert [int(row['survey_coverage_count']) for row in csv_rows] == [1, 1, 1]
 	assert artifacts.png_path.is_file()
 
 

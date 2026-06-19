@@ -253,15 +253,33 @@ def _write_histogram_csv(path: Path, rows: Sequence[Mapping[str, object]]) -> No
 	with path.open('w', encoding='utf-8', newline='') as file_obj:
 		writer = csv.DictWriter(
 			file_obj,
-			fieldnames=('cluster', 'token_count', 'valid_fraction'),
+			fieldnames=(
+				'cluster',
+				'token_count',
+				'valid_fraction',
+				'mean_amplitude_norm',
+				'std_amplitude_norm',
+				'mean_embedding_norm',
+				'survey_coverage_count',
+				'survey_coverage_fraction',
+			),
 		)
 		writer.writeheader()
 		for row in rows:
+			survey_coverage = row['survey_coverage']
+			if not isinstance(survey_coverage, Mapping):
+				msg = f'expected survey_coverage mapping; got {survey_coverage!r}'
+				raise TypeError(msg)
 			writer.writerow(
 				{
 					'cluster': row['cluster'],
 					'token_count': row['token_count'],
 					'valid_fraction': row['valid_fraction'],
+					'mean_amplitude_norm': row['mean_amplitude_norm'],
+					'std_amplitude_norm': row['std_amplitude_norm'],
+					'mean_embedding_norm': row['mean_embedding_norm'],
+					'survey_coverage_count': survey_coverage['count'],
+					'survey_coverage_fraction': survey_coverage['fraction'],
 				},
 			)
 

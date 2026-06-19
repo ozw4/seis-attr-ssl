@@ -3,9 +3,9 @@ paths:
   nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 clustering:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/clusters/nopims/pretrain_v1
+  input_dir: /workspace/artifacts/seis_ssl_cluster/runs/clusters/nopims/pretrain_v1
 visualization:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/figures/clusters/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/runs/figures/clusters/nopims/pretrain_v1
   modes: [token, voxel]
   reconstruct_voxel: true
   xy_slices: [32]
