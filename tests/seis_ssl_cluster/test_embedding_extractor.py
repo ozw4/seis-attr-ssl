@@ -48,6 +48,7 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 
 	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
 	assert metadata['source_amplitude_path'].endswith('amplitude.npy')
+	assert metadata['volume_shape_xyz'] == [5, 6, 7]
 	assert metadata['checkpoint_path'].endswith('mae.pt')
 	assert metadata['checkpoint_sha256']
 	assert metadata['patch_size'] == [2, 2, 2]

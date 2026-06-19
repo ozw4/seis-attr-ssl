@@ -126,6 +126,11 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 				_open_amplitude(embedding_metadata) if underlay_enabled else None
 			)
 			if 'token' in modes:
+				token_amplitude = _amplitude_underlay_for_labels(
+					amplitude,
+					token_labels,
+					embedding_metadata,
+				)
 				png_count += len(
 					clusters.save_cluster_slice_pngs(
 						token_labels,
@@ -134,7 +139,8 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 						mode='token',
 						output_dir=output_dir / 'token',
 						slices=slice_request,
-						amplitude=None,
+						amplitude=token_amplitude,
+						amplitude_alpha=underlay_alpha,
 						invalid_color=invalid_color,
 						dpi=dpi,
 					),
@@ -226,6 +232,82 @@ def _open_amplitude(metadata: Mapping[str, object]) -> np.ndarray | None:
 	if array.ndim != 3:
 		return None
 	return array
+
+
+def _amplitude_underlay_for_labels(
+	amplitude: np.ndarray | None,
+	labels: np.ndarray,
+	metadata: Mapping[str, object],
+) -> np.ndarray | None:
+	if amplitude is None:
+		return None
+	if amplitude.shape == labels.shape:
+		return amplitude
+	patch = _metadata_xyz(metadata.get('patch_size', (1, 1, 1)), 'patch_size')
+	padded_shape = tuple(
+		label_axis * patch_axis
+		for label_axis, patch_axis in zip(labels.shape, patch, strict=True)
+	)
+	if any(
+		amplitude_axis > padded_axis
+		for amplitude_axis, padded_axis in zip(
+			amplitude.shape,
+			padded_shape,
+			strict=True,
+		)
+	):
+		msg = (
+			'amplitude underlay shape is incompatible with token labels; '
+			f'got amplitude={amplitude.shape!r}, labels={labels.shape!r}, '
+			f'patch_size={patch!r}'
+		)
+		raise ValueError(msg)
+	return _downsample_amplitude_to_tokens(amplitude, labels.shape, patch)
+
+
+def _downsample_amplitude_to_tokens(
+	amplitude: np.ndarray,
+	token_shape: tuple[int, int, int],
+	patch: tuple[int, int, int],
+) -> np.ndarray:
+	underlay = np.empty(token_shape, dtype=np.float32)
+	for token_x in range(token_shape[0]):
+		x_start = token_x * patch[0]
+		x_stop = min(x_start + patch[0], amplitude.shape[0])
+		for token_y in range(token_shape[1]):
+			y_start = token_y * patch[1]
+			y_stop = min(y_start + patch[1], amplitude.shape[1])
+			for token_z in range(token_shape[2]):
+				z_start = token_z * patch[2]
+				z_stop = min(z_start + patch[2], amplitude.shape[2])
+				values = np.asarray(
+					amplitude[x_start:x_stop, y_start:y_stop, z_start:z_stop],
+					dtype=np.float32,
+				)
+				finite = values[np.isfinite(values)]
+				underlay[token_x, token_y, token_z] = (
+					float(finite.mean()) if finite.size else np.nan
+				)
+	return underlay
+
+
+def _metadata_xyz(value: object, name: str) -> tuple[int, int, int]:
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str)
+		or len(value) != 3
+		or any(
+			isinstance(item, bool) or not isinstance(item, Integral)
+			for item in value
+		)
+	):
+		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
+		raise TypeError(msg)
+	xyz = tuple(int(item) for item in value)
+	if any(item <= 0 for item in xyz):
+		msg = f'{name} values must be positive; got {xyz!r}'
+		raise ValueError(msg)
+	return xyz
 
 
 def _required_mapping(

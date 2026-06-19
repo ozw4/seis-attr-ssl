@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,6 +16,8 @@ from seis_ssl_cluster.data.normalization import (
 	load_normalization_stats,
 	normalize_amplitude,
 )
+
+_TOKEN_CHUNK_SIZE = 1_000_000
 
 
 @dataclass(frozen=True)
@@ -117,44 +119,74 @@ def _summarize_one(
 	if labels.ndim != 3:
 		msg = f'labels must be 3D: {item.labels_path}'
 		raise ValueError(msg)
-	valid = np.asarray(labels >= 0)
-	valid_labels = np.asarray(labels[valid], dtype=np.int64)
-	if np.any(valid_labels >= k):
-		msg = f'label value exceeds k={k}: {item.labels_path}'
-		raise ValueError(msg)
-	counts = np.bincount(valid_labels, minlength=k)
+	embeddings = _load_embeddings(item.embeddings_path, labels.shape)
+	counts = _add_token_counts_and_embeddings(
+		labels,
+		embeddings=embeddings,
+		accumulator=accumulator,
+		k=k,
+	)
 	accumulator['counts'] += counts
 	accumulator['invalid_count'] = int(accumulator['invalid_count']) + int(
-		labels.size - valid_labels.size,
+		labels.size - int(counts.sum()),
 	)
 	survey_hits[...] = counts > 0
-	if item.embeddings_path is not None and item.embeddings_path.is_file():
-		_add_embedding_norms(item.embeddings_path, valid, valid_labels, accumulator, k)
 	if include_amplitude_norm:
 		_add_amplitude_norms(item, labels, accumulator)
 
 
-def _add_embedding_norms(
-	embeddings_path: Path,
-	valid_mask: np.ndarray,
-	valid_labels: np.ndarray,
-	accumulator: dict[str, np.ndarray | int],
-	k: int,
-) -> None:
+def _load_embeddings(
+	embeddings_path: Path | None,
+	labels_shape: tuple[int, ...],
+) -> np.ndarray | None:
+	if embeddings_path is None or not embeddings_path.is_file():
+		return None
 	embeddings = np.load(embeddings_path, mmap_mode='r')
-	if embeddings.shape[:3] != valid_mask.shape:
+	if embeddings.ndim != 4 or embeddings.shape[:3] != labels_shape:
 		msg = (
 			'embeddings token grid must match labels; '
-			f'got {embeddings.shape[:3]!r} and {valid_mask.shape!r}'
+			f'got {embeddings.shape[:3]!r} and {labels_shape!r}'
 		)
 		raise ValueError(msg)
-	norms = np.linalg.norm(np.asarray(embeddings[valid_mask]), axis=1)
-	accumulator['embedding_norm_sum'] += np.bincount(
-		valid_labels,
-		weights=norms,
-		minlength=k,
+	return embeddings
+
+
+def _add_token_counts_and_embeddings(
+	labels: np.ndarray,
+	*,
+	embeddings: np.ndarray | None,
+	accumulator: dict[str, np.ndarray | int],
+	k: int,
+) -> np.ndarray:
+	counts = np.zeros(k, dtype=np.int64)
+	embedding_flat = (
+		embeddings.reshape((-1, embeddings.shape[-1]))
+		if embeddings is not None
+		else None
 	)
-	accumulator['embedding_norm_count'] += np.bincount(valid_labels, minlength=k)
+	for start, labels_chunk in _iter_label_chunks(labels):
+		valid_mask = labels_chunk >= 0
+		if not bool(np.any(valid_mask)):
+			continue
+		valid_labels = np.asarray(labels_chunk[valid_mask], dtype=np.int64)
+		if np.any(valid_labels >= k):
+			msg = f'label value exceeds k={k}'
+			raise ValueError(msg)
+		counts += np.bincount(valid_labels, minlength=k)
+		if embedding_flat is None:
+			continue
+		embedding_chunk = np.asarray(embedding_flat[start : start + labels_chunk.size])
+		norms = np.linalg.norm(np.asarray(embedding_chunk[valid_mask]), axis=1)
+		accumulator['embedding_norm_sum'] += np.bincount(
+			valid_labels,
+			weights=norms,
+			minlength=k,
+		)
+		accumulator['embedding_norm_count'] += np.bincount(
+			valid_labels,
+			minlength=k,
+		)
+	return counts
 
 
 def _add_amplitude_norms(
@@ -173,37 +205,49 @@ def _add_amplitude_norms(
 	volume = np.load(source_path, mmap_mode='r')
 	shape = resolve_volume_shape_xyz(metadata, labels.shape, patch)
 	stats = load_normalization_stats(stats_path)
-	for index in np.flatnonzero(np.asarray(labels >= 0).reshape(-1)):
-		label = int(labels.reshape(-1)[index])
-		token_xyz = np.unravel_index(index, labels.shape)
-		start = tuple(
-			axis * patch_axis
-			for axis, patch_axis in zip(token_xyz, patch, strict=True)
-		)
-		stop = tuple(
-			min(axis_start + patch_axis, shape_axis)
-			for axis_start, patch_axis, shape_axis in zip(
-				start,
-				patch,
-				shape,
-				strict=True,
+	for chunk_start, labels_chunk in _iter_label_chunks(labels):
+		valid_offsets = np.flatnonzero(labels_chunk >= 0)
+		if valid_offsets.size == 0:
+			continue
+		for offset in valid_offsets:
+			index = int(chunk_start + int(offset))
+			label = int(labels_chunk[offset])
+			token_xyz = np.unravel_index(index, labels.shape)
+			start = tuple(
+				axis * patch_axis
+				for axis, patch_axis in zip(token_xyz, patch, strict=True)
 			)
-		)
-		patch_values = np.asarray(
-			volume[start[0] : stop[0], start[1] : stop[1], start[2] : stop[2]],
-		)
-		if patch_values.size == 0:
-			continue
-		normalized = normalize_amplitude(patch_values, stats).astype(
-			np.float64,
-			copy=False,
-		)
-		values = normalized[np.isfinite(normalized)]
-		if values.size == 0:
-			continue
-		accumulator['amplitude_sum'][label] += float(values.sum())
-		accumulator['amplitude_sumsq'][label] += float(np.dot(values, values))
-		accumulator['amplitude_count'][label] += int(values.size)
+			stop = tuple(
+				min(axis_start + patch_axis, shape_axis)
+				for axis_start, patch_axis, shape_axis in zip(
+					start,
+					patch,
+					shape,
+					strict=True,
+				)
+			)
+			patch_values = np.asarray(
+				volume[start[0] : stop[0], start[1] : stop[1], start[2] : stop[2]],
+			)
+			if patch_values.size == 0:
+				continue
+			normalized = normalize_amplitude(patch_values, stats).astype(
+				np.float64,
+				copy=False,
+			)
+			values = normalized[np.isfinite(normalized)]
+			if values.size == 0:
+				continue
+			accumulator['amplitude_sum'][label] += float(values.sum())
+			accumulator['amplitude_sumsq'][label] += float(np.dot(values, values))
+			accumulator['amplitude_count'][label] += int(values.size)
+
+
+def _iter_label_chunks(labels: np.ndarray) -> Iterator[tuple[int, np.ndarray]]:
+	flat_labels = labels.reshape(-1)
+	for start in range(0, flat_labels.size, _TOKEN_CHUNK_SIZE):
+		stop = min(start + _TOKEN_CHUNK_SIZE, flat_labels.size)
+		yield start, np.asarray(flat_labels[start:stop])
 
 
 def _summary_rows(

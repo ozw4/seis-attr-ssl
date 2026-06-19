@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -74,6 +75,21 @@ def test_amplitude_underlay_changes_visible_cluster_pixels(tmp_path: Path) -> No
 	assert not np.array_equal(plt.imread(first), plt.imread(second))
 
 
+def test_proc_visualization_token_mode_uses_amplitude_underlay(
+	tmp_path: Path,
+) -> None:
+	first = _run_token_underlay_visualization(
+		tmp_path / 'first',
+		np.zeros((4, 4, 1), dtype=np.float32),
+	)
+	second = _run_token_underlay_visualization(
+		tmp_path / 'second',
+		np.linspace(-1.0, 1.0, 16, dtype=np.float32).reshape(4, 4, 1),
+	)
+
+	assert not np.array_equal(plt.imread(first), plt.imread(second))
+
+
 def test_cluster_colormap_is_stable_for_same_k() -> None:
 	first = stable_cluster_colors(4)
 	second = stable_cluster_colors(4)
@@ -135,3 +151,43 @@ def test_proc_visualization_rejects_non_integer_slice_values(
 				},
 			},
 		)
+
+
+def _run_token_underlay_visualization(root: Path, amplitude: np.ndarray) -> Path:
+	input_dir = root / 'cluster_run'
+	output_dir = root / 'figures'
+	labels_dir = input_dir / 'labels' / 'k1'
+	labels_dir.mkdir(parents=True)
+	np.save(
+		labels_dir / 'survey.cluster_labels_token.npy',
+		np.zeros((2, 2, 1), dtype=np.int32),
+	)
+	amplitude_path = root / 'survey.npy'
+	np.save(amplitude_path, amplitude)
+	(labels_dir / 'survey.cluster_label_metadata.json').write_text(
+		json.dumps(
+			{
+				'source_amplitude_path': str(amplitude_path),
+				'patch_size': [2, 2, 1],
+			},
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
+
+	result = run_cluster_visualization(
+		{
+			'clustering': {'input_dir': str(input_dir)},
+			'visualization': {
+				'output_dir': str(output_dir),
+				'modes': ['token'],
+				'xy_slices': [0],
+				'xz_slices': [],
+				'summaries': {'enabled': False},
+				'amplitude_underlay': {'enabled': True, 'alpha': 0.8},
+			},
+		},
+	)
+
+	assert result == {'png_count': 1, 'voxel_count': 0, 'summary_count': 0}
+	return output_dir / 'token' / 'survey_k1_xy_z0.png'

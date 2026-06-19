@@ -309,6 +309,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 	return {
 		'survey_id': manifest.survey_id,
 		'source_amplitude_path': str(amplitude_path),
+		'volume_shape_xyz': list(manifest.amplitude.shape_xyz),
 		'checkpoint_path': str(settings.checkpoint_path),
 		'checkpoint_sha256': resolved_checkpoint_sha256,
 		'model_geometry': _model_geometry(checkpoint_config, model),

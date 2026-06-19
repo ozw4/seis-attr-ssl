@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.summaries as summaries_module
 from seis_ssl_cluster.clustering.reconstruct import (
 	reconstruct_labels_for_survey,
 	reconstruct_voxel_labels,
@@ -95,7 +96,11 @@ def test_reconstruct_labels_for_survey_uses_embedding_metadata_shape(
 	assert np.load(result.voxel_labels_path).shape == (3, 5, 4)
 
 
-def test_cluster_summary_counts_equal_valid_assigned_tokens(tmp_path: Path) -> None:
+def test_cluster_summary_counts_equal_valid_assigned_tokens(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setattr(summaries_module, '_TOKEN_CHUNK_SIZE', 3)
 	labels_path = tmp_path / 'survey.cluster_labels_token.npy'
 	embeddings_path = tmp_path / 'survey.embeddings.npy'
 	np.save(
