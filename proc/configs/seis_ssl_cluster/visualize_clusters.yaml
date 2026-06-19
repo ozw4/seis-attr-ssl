@@ -8,8 +8,9 @@ visualization:
   output_dir: /workspace/artifacts/seis_ssl_cluster/runs/figures/clusters/nopims/pretrain_v1
   modes: [token, voxel]
   reconstruct_voxel: true
-  xy_slices: [32]
-  xz_slices: [64]
+  slice_coordinate_space: voxel
+  xy_slices: [750]
+  xz_slices: [150]
   dpi: 160
   invalid_color: lightgray
   amplitude_underlay:

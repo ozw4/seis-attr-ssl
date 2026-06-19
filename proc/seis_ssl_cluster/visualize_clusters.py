@@ -7,6 +7,7 @@ import json
 import sys
 from argparse import ArgumentParser
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
 
@@ -25,6 +26,13 @@ DEFAULT_CONFIG = (
 	/ 'seis_ssl_cluster'
 	/ 'visualize_clusters.yaml'
 )
+XYZ = tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class _SurveyGeometry:
+	patch_size_xyz: XYZ
+	volume_shape_xyz: XYZ
 
 
 def main() -> None:
@@ -57,7 +65,9 @@ def main() -> None:
 	)
 
 
-def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
+def run_cluster_visualization(  # noqa: C901, PLR0915
+	config: Mapping[str, object],
+) -> dict[str, int]:
 	"""Run cluster-map reconstruction, summaries, and configured PNG rendering."""
 	reconstruct = importlib.import_module('seis_ssl_cluster.clustering.reconstruct')
 	summaries = importlib.import_module('seis_ssl_cluster.clustering.summaries')
@@ -74,6 +84,9 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 	slice_request = clusters.ClusterSliceRequest(
 		xy_slices=_int_tuple(visualization.get('xy_slices', ()), 'xy_slices'),
 		xz_slices=_int_tuple(visualization.get('xz_slices', ()), 'xz_slices'),
+	)
+	_validate_slice_coordinate_space(
+		visualization.get('slice_coordinate_space', 'voxel'),
 	)
 	dpi = _positive_int(visualization.get('dpi', 160), 'visualization.dpi')
 	invalid_color = str(visualization.get('invalid_color', 'lightgray'))
@@ -125,11 +138,34 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 			amplitude = (
 				_open_amplitude(embedding_metadata) if underlay_enabled else None
 			)
+			needs_geometry = (
+				'token' in modes
+				or reconstruct_voxel
+				or 'voxel' in modes
+			)
+			geometry = (
+				_required_survey_geometry(
+					embedding_metadata,
+					token_shape_xyz=token_labels.shape,
+					survey_id=survey_id,
+				)
+				if needs_geometry
+				else None
+			)
 			if 'token' in modes:
+				if geometry is None:
+					msg = 'internal error: token visualization requires geometry'
+					raise RuntimeError(msg)
+				token_slices = _token_slice_request(
+					slice_request,
+					token_shape_xyz=token_labels.shape,
+					geometry=geometry,
+					survey_id=survey_id,
+				)
 				token_amplitude = _amplitude_underlay_for_labels(
 					amplitude,
 					token_labels,
-					embedding_metadata,
+					geometry.patch_size_xyz,
 				)
 				png_count += len(
 					clusters.save_cluster_slice_pngs(
@@ -138,7 +174,7 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 						k=k,
 						mode='token',
 						output_dir=output_dir / 'token',
-						slices=slice_request,
+						slices=token_slices,
 						amplitude=token_amplitude,
 						amplitude_alpha=underlay_alpha,
 						invalid_color=invalid_color,
@@ -147,6 +183,9 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 				)
 			voxel_path = k_dir / f'{survey_id}.cluster_labels_voxel.npy'
 			if reconstruct_voxel or 'voxel' in modes:
+				if geometry is None:
+					msg = 'internal error: voxel reconstruction requires geometry'
+					raise RuntimeError(msg)
 				reconstruct.reconstruct_labels_for_survey(
 					token_path,
 					metadata_path=metadata_path,
@@ -154,6 +193,14 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 				)
 				voxel_count += 1
 			if 'voxel' in modes:
+				if geometry is None:
+					msg = 'internal error: voxel visualization requires geometry'
+					raise RuntimeError(msg)
+				voxel_slices = _voxel_slice_request(
+					slice_request,
+					geometry=geometry,
+					survey_id=survey_id,
+				)
 				voxel_labels = np.load(voxel_path, mmap_mode='r')
 				png_count += len(
 					clusters.save_cluster_slice_pngs(
@@ -162,7 +209,7 @@ def run_cluster_visualization(config: Mapping[str, object]) -> dict[str, int]:
 						k=k,
 						mode='voxel',
 						output_dir=output_dir / 'voxel',
-						slices=slice_request,
+						slices=voxel_slices,
 						amplitude=amplitude,
 						amplitude_alpha=underlay_alpha,
 						invalid_color=invalid_color,
@@ -237,13 +284,12 @@ def _open_amplitude(metadata: Mapping[str, object]) -> np.ndarray | None:
 def _amplitude_underlay_for_labels(
 	amplitude: np.ndarray | None,
 	labels: np.ndarray,
-	metadata: Mapping[str, object],
+	patch: XYZ,
 ) -> np.ndarray | None:
 	if amplitude is None:
 		return None
 	if amplitude.shape == labels.shape:
 		return amplitude
-	patch = _metadata_xyz(metadata.get('patch_size', (1, 1, 1)), 'patch_size')
 	padded_shape = tuple(
 		label_axis * patch_axis
 		for label_axis, patch_axis in zip(labels.shape, patch, strict=True)
@@ -263,6 +309,226 @@ def _amplitude_underlay_for_labels(
 		)
 		raise ValueError(msg)
 	return _downsample_amplitude_to_tokens(amplitude, labels.shape, patch)
+
+
+def _validate_slice_coordinate_space(value: object) -> None:
+	if value != 'voxel':
+		msg = (
+			'visualization.slice_coordinate_space must be "voxel"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+
+
+def _required_survey_geometry(
+	metadata: Mapping[str, object],
+	*,
+	token_shape_xyz: Sequence[int],
+	survey_id: str,
+) -> _SurveyGeometry:
+	if 'patch_size' not in metadata:
+		msg = (
+			f'cluster visualization for survey {survey_id!r} requires '
+			'metadata field patch_size to map voxel-space slices to '
+			'token-space slices and reconstruct voxel labels'
+		)
+		raise ValueError(msg)
+	patch = _metadata_xyz(metadata['patch_size'], 'patch_size')
+	volume_shape = _required_volume_shape_xyz(metadata, survey_id=survey_id)
+	_validate_volume_fits_token_grid(
+		volume_shape,
+		token_shape_xyz=token_shape_xyz,
+		patch_size_xyz=patch,
+		survey_id=survey_id,
+	)
+	return _SurveyGeometry(
+		patch_size_xyz=patch,
+		volume_shape_xyz=volume_shape,
+	)
+
+
+def _required_volume_shape_xyz(
+	metadata: Mapping[str, object],
+	*,
+	survey_id: str,
+) -> XYZ:
+	for key in ('volume_shape_xyz', 'volume_shape', 'shape_xyz'):
+		if key in metadata:
+			return _metadata_xyz(metadata[key], key)
+	source_path = metadata.get('source_amplitude_path')
+	if isinstance(source_path, str) and source_path:
+		path = Path(source_path)
+		if path.is_file():
+			array = np.load(path, mmap_mode='r')
+			if array.ndim == 3:
+				return tuple(int(axis) for axis in array.shape)
+	msg = (
+		f'cluster visualization for survey {survey_id!r} requires '
+		'volume_shape_xyz or a valid source_amplitude_path to interpret '
+		'configured slices as original voxel coordinates'
+	)
+	raise ValueError(msg)
+
+
+def _validate_volume_fits_token_grid(
+	volume_shape_xyz: XYZ,
+	*,
+	token_shape_xyz: Sequence[int],
+	patch_size_xyz: XYZ,
+	survey_id: str,
+) -> None:
+	token_shape = _metadata_xyz(token_shape_xyz, 'token_shape_xyz')
+	padded_shape = tuple(
+		token_axis * patch_axis
+		for token_axis, patch_axis in zip(token_shape, patch_size_xyz, strict=True)
+	)
+	if any(
+		volume_axis > padded_axis
+		for volume_axis, padded_axis in zip(
+			volume_shape_xyz,
+			padded_shape,
+			strict=True,
+		)
+	):
+		msg = (
+			f'cluster visualization metadata for survey {survey_id!r} is '
+			'incompatible with token labels; '
+			f'volume_shape_xyz={volume_shape_xyz!r}, '
+			f'token_shape_xyz={token_shape!r}, '
+			f'patch_size={patch_size_xyz!r}'
+		)
+		raise ValueError(msg)
+
+
+def _token_slice_request(
+	slices: object,
+	*,
+	token_shape_xyz: Sequence[int],
+	geometry: _SurveyGeometry,
+	survey_id: str,
+) -> object:
+	clusters = importlib.import_module('seis_ssl_cluster.visualization.clusters')
+	return clusters.ClusterSliceRequest(
+		xy_slices=tuple(
+			_token_slice(
+				voxel_index,
+				view='xy',
+				token_shape_xyz=token_shape_xyz,
+				geometry=geometry,
+				survey_id=survey_id,
+			)
+			for voxel_index in slices.xy_slices
+		),
+		xz_slices=tuple(
+			_token_slice(
+				voxel_index,
+				view='xz',
+				token_shape_xyz=token_shape_xyz,
+				geometry=geometry,
+				survey_id=survey_id,
+			)
+			for voxel_index in slices.xz_slices
+		),
+	)
+
+
+def _token_slice(
+	voxel_index: int,
+	*,
+	view: str,
+	token_shape_xyz: Sequence[int],
+	geometry: _SurveyGeometry,
+	survey_id: str,
+) -> object:
+	clusters = importlib.import_module('seis_ssl_cluster.visualization.clusters')
+	_validate_voxel_slice_index(
+		voxel_index,
+		view=view,
+		volume_shape_xyz=geometry.volume_shape_xyz,
+		survey_id=survey_id,
+	)
+	axis = 2 if view == 'xy' else 1
+	token_shape = _metadata_xyz(token_shape_xyz, 'token_shape_xyz')
+	token_index = voxel_index // geometry.patch_size_xyz[axis]
+	if token_index < 0 or token_index >= token_shape[axis]:
+		msg = (
+			f'{view} voxel slice {voxel_index} maps to token index '
+			f'{token_index}, outside token label shape {token_shape!r} '
+			f'for survey {survey_id!r}'
+		)
+		raise ValueError(msg)
+	return clusters.ClusterSlice(
+		array_slice_index=token_index,
+		voxel_slice_index=voxel_index,
+	)
+
+
+def _voxel_slice_request(
+	slices: object,
+	*,
+	geometry: _SurveyGeometry,
+	survey_id: str,
+) -> object:
+	clusters = importlib.import_module('seis_ssl_cluster.visualization.clusters')
+	return clusters.ClusterSliceRequest(
+		xy_slices=tuple(
+			_voxel_slice(
+				voxel_index,
+				view='xy',
+				geometry=geometry,
+				survey_id=survey_id,
+			)
+			for voxel_index in slices.xy_slices
+		),
+		xz_slices=tuple(
+			_voxel_slice(
+				voxel_index,
+				view='xz',
+				geometry=geometry,
+				survey_id=survey_id,
+			)
+			for voxel_index in slices.xz_slices
+		),
+	)
+
+
+def _voxel_slice(
+	voxel_index: int,
+	*,
+	view: str,
+	geometry: _SurveyGeometry,
+	survey_id: str,
+) -> object:
+	clusters = importlib.import_module('seis_ssl_cluster.visualization.clusters')
+	_validate_voxel_slice_index(
+		voxel_index,
+		view=view,
+		volume_shape_xyz=geometry.volume_shape_xyz,
+		survey_id=survey_id,
+	)
+	return clusters.ClusterSlice(
+		array_slice_index=voxel_index,
+		voxel_slice_index=voxel_index,
+	)
+
+
+def _validate_voxel_slice_index(
+	voxel_index: int,
+	*,
+	view: str,
+	volume_shape_xyz: XYZ,
+	survey_id: str,
+) -> None:
+	axis = 2 if view == 'xy' else 1
+	if view not in {'xy', 'xz'}:
+		msg = f'unknown view: {view!r}'
+		raise ValueError(msg)
+	if voxel_index < 0 or voxel_index >= volume_shape_xyz[axis]:
+		msg = (
+			f'{view} voxel slice index out of range for survey {survey_id!r}: '
+			f'{voxel_index}; valid=[0, {volume_shape_xyz[axis] - 1}]'
+		)
+		raise ValueError(msg)
 
 
 def _downsample_amplitude_to_tokens(

@@ -1,6 +1,7 @@
 """Visualization components for seismic SSL clustering."""
 
 from seis_ssl_cluster.visualization.clusters import (
+	ClusterSlice,
 	ClusterSliceRequest,
 	save_cluster_slice_pngs,
 	stable_cluster_colors,
@@ -11,6 +12,7 @@ from seis_ssl_cluster.visualization.mae_debug import (
 )
 
 __all__ = [
+	'ClusterSlice',
 	'ClusterSliceRequest',
 	'MaeDebugVisualizationConfig',
 	'save_cluster_slice_pngs',
