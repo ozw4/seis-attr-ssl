@@ -54,7 +54,11 @@ def test_synthetic_amplitude_mvp_flow(tmp_path: Path) -> None:
 		survey_ids=survey_ids,
 	)
 	cluster_dir = _cluster_embeddings(artifact_root, embedding_dir)
-	visualization_dir = _visualize_clusters(artifact_root, cluster_dir)
+	visualization_dir = _visualize_clusters(
+		artifact_root,
+		cluster_dir,
+		survey_ids=survey_ids,
+	)
 	_assert_end_to_end_outputs(
 		cluster_dir=cluster_dir,
 		visualization_dir=visualization_dir,
@@ -232,13 +236,19 @@ def _cluster_embeddings(artifact_root: Path, embedding_dir: Path) -> Path:
 	return cluster_dir
 
 
-def _visualize_clusters(artifact_root: Path, cluster_dir: Path) -> Path:
+def _visualize_clusters(
+	artifact_root: Path,
+	cluster_dir: Path,
+	*,
+	survey_ids: list[str],
+) -> Path:
 	visualization_dir = artifact_root / 'runs' / 'figures' / 'synthetic'
 	visualization_result = run_cluster_visualization(
 		{
 			'clustering': {'input_dir': str(cluster_dir)},
 			'visualization': {
 				'output_dir': str(visualization_dir),
+				'survey_ids': survey_ids,
 				'modes': ['token', 'voxel'],
 				'reconstruct_voxel': True,
 				'xy_slices': [1],

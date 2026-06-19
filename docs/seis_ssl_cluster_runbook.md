@@ -95,4 +95,10 @@ python proc/seis_ssl_cluster/visualize_clusters.py \
 ```
 
 This reconstructs voxel labels when configured and writes XY/XZ PNGs for token
-and voxel cluster maps.
+and voxel cluster maps. The default config renders token PNGs and summaries only.
+Voxel-label reconstruction is a derived-artifact step: set
+`visualization.survey_ids` to the intended survey subset and
+`visualization.reconstruct_voxel: true`. Reconstructing every discovered survey
+requires the explicit
+`visualization.allow_all_surveys_for_voxel_reconstruction: true` opt-in, and
+large estimated outputs require `visualization.allow_large_voxel_output: true`.

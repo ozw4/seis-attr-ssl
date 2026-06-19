@@ -11,11 +11,19 @@ from seis_ssl_cluster.visualization.common import slice_image
 
 
 @dataclass(frozen=True)
+class ClusterSlice:
+	"""One rendered slice with array and physical voxel coordinates."""
+
+	array_slice_index: int
+	voxel_slice_index: int
+
+
+@dataclass(frozen=True)
 class ClusterSliceRequest:
 	"""Configured cluster slices for one rendering mode."""
 
-	xy_slices: tuple[int, ...] = ()
-	xz_slices: tuple[int, ...] = ()
+	xy_slices: tuple[int | ClusterSlice, ...] = ()
+	xz_slices: tuple[int | ClusterSlice, ...] = ()
 
 
 def save_cluster_slice_pngs(  # noqa: PLR0913
@@ -48,14 +56,15 @@ def save_cluster_slice_pngs(  # noqa: PLR0913
 			k=k,
 			mode=mode,
 			view='xy',
-			slice_index=index,
+			slice_index=index.array_slice_index,
+			voxel_slice_index=index.voxel_slice_index,
 			output_dir=root,
 			amplitude=amplitude,
 			amplitude_alpha=amplitude_alpha,
 			invalid_color=invalid_color,
 			dpi=dpi,
 		)
-		for index in slices.xy_slices
+		for index in _normalize_slice_specs(slices.xy_slices)
 	]
 	created.extend(
 		[
@@ -65,14 +74,15 @@ def save_cluster_slice_pngs(  # noqa: PLR0913
 				k=k,
 				mode=mode,
 				view='xz',
-				slice_index=index,
+				slice_index=index.array_slice_index,
+				voxel_slice_index=index.voxel_slice_index,
 				output_dir=root,
 				amplitude=amplitude,
 				amplitude_alpha=amplitude_alpha,
 				invalid_color=invalid_color,
 				dpi=dpi,
 			)
-			for index in slices.xz_slices
+			for index in _normalize_slice_specs(slices.xz_slices)
 		],
 	)
 	return created
@@ -114,6 +124,7 @@ def _save_one_slice(  # noqa: PLR0913
 	mode: str,
 	view: str,
 	slice_index: int,
+	voxel_slice_index: int,
 	output_dir: Path,
 	amplitude: np.ndarray | None,
 	amplitude_alpha: float,
@@ -159,20 +170,67 @@ def _save_one_slice(  # noqa: PLR0913
 		origin='lower',
 		interpolation='none',
 	)
-	ax.set_title(f'{survey_id} k={k} {mode} {view.upper()} slice={slice_index}')
+	ax.set_title(
+		_slice_title(
+			survey_id=survey_id,
+			k=k,
+			mode=mode,
+			view=view,
+			array_slice_index=slice_index,
+			voxel_slice_index=voxel_slice_index,
+		),
+	)
 	ax.set_xlabel('x')
 	ax.set_ylabel('y' if view == 'xy' else 'z')
 	ax.tick_params(labelsize=7)
 	fig.tight_layout()
 	stem = (
-		f'{survey_id}_k{k}_xy_z{slice_index}.png'
+		f'{survey_id}_k{k}_xy_z{voxel_slice_index}.png'
 		if view == 'xy'
-		else f'{survey_id}_k{k}_xz_y{slice_index}.png'
+		else f'{survey_id}_k{k}_xz_y{voxel_slice_index}.png'
 	)
 	out_path = output_dir / stem
 	fig.savefig(out_path)
 	plt.close(fig)
 	return out_path
+
+
+def _normalize_slice_specs(
+	slices: tuple[int | ClusterSlice, ...],
+) -> tuple[ClusterSlice, ...]:
+	normalized = []
+	for item in slices:
+		if isinstance(item, ClusterSlice):
+			normalized.append(item)
+		else:
+			normalized.append(
+				ClusterSlice(
+					array_slice_index=int(item),
+					voxel_slice_index=int(item),
+				),
+			)
+	return tuple(normalized)
+
+
+def _slice_title(  # noqa: PLR0913
+	*,
+	survey_id: str,
+	k: int,
+	mode: str,
+	view: str,
+	array_slice_index: int,
+	voxel_slice_index: int,
+) -> str:
+	axis = 'z' if view == 'xy' else 'y'
+	if mode == 'token':
+		return (
+			f'{survey_id} k={k} token {view.upper()} '
+			f'voxel-{axis}={voxel_slice_index} token-{axis}={array_slice_index}'
+		)
+	return (
+		f'{survey_id} k={k} {mode} {view.upper()} '
+		f'voxel-{axis}={voxel_slice_index}'
+	)
 
 
 def _validate_labels(labels: np.ndarray) -> np.ndarray:
@@ -227,6 +285,7 @@ def _matplotlib_colors() -> object:
 
 
 __all__ = [
+	'ClusterSlice',
 	'ClusterSliceRequest',
 	'save_cluster_slice_pngs',
 	'stable_cluster_colors',

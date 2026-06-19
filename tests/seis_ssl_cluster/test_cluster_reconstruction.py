@@ -96,6 +96,59 @@ def test_reconstruct_labels_for_survey_uses_embedding_metadata_shape(
 	assert np.load(result.voxel_labels_path).shape == (3, 5, 4)
 
 
+def test_reconstruct_labels_for_survey_skips_compatible_existing_voxels(
+	tmp_path: Path,
+) -> None:
+	labels_dir = tmp_path / 'labels' / 'k2'
+	labels_dir.mkdir(parents=True)
+	token_path = labels_dir / 'survey.cluster_labels_token.npy'
+	metadata_path = labels_dir / 'survey.cluster_label_metadata.json'
+	voxel_path = labels_dir / 'survey.cluster_labels_voxel.npy'
+	np.save(token_path, np.ones((1, 1, 1), dtype=np.int32))
+	np.save(voxel_path, np.full((2, 2, 2), 7, dtype=np.int32))
+	metadata_path.write_text(
+		json.dumps({'patch_size': [2, 2, 2], 'volume_shape_xyz': [2, 2, 2]})
+		+ '\n',
+		encoding='utf-8',
+	)
+
+	result = reconstruct_labels_for_survey(
+		token_path,
+		metadata_path=metadata_path,
+		skip_existing_voxel_labels=True,
+	)
+
+	assert result.skipped_existing_voxel_labels is True
+	np.testing.assert_array_equal(
+		np.load(voxel_path),
+		np.full((2, 2, 2), 7, dtype=np.int32),
+	)
+
+
+def test_reconstruct_labels_for_survey_rejects_incompatible_existing_voxels(
+	tmp_path: Path,
+) -> None:
+	labels_dir = tmp_path / 'labels' / 'k2'
+	labels_dir.mkdir(parents=True)
+	token_path = labels_dir / 'survey.cluster_labels_token.npy'
+	metadata_path = labels_dir / 'survey.cluster_label_metadata.json'
+	voxel_path = labels_dir / 'survey.cluster_labels_voxel.npy'
+	np.save(token_path, np.ones((1, 1, 1), dtype=np.int32))
+	np.save(voxel_path, np.ones((2, 2, 2), dtype=np.float32))
+	metadata_path.write_text(
+		json.dumps({'patch_size': [2, 2, 2], 'volume_shape_xyz': [2, 2, 2]})
+		+ '\n',
+		encoding='utf-8',
+	)
+
+	with pytest.raises(ValueError, match='incompatible existing voxel labels'):
+		reconstruct_labels_for_survey(
+			token_path,
+			metadata_path=metadata_path,
+			skip_existing_voxel_labels=True,
+		)
+
+
 def test_cluster_summary_counts_equal_valid_assigned_tokens(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

@@ -25,6 +25,7 @@ class ReconstructedLabels:
 	voxel_labels_path: Path | None
 	token_shape_xyz: XYZ
 	voxel_shape_xyz: XYZ | None
+	skipped_existing_voxel_labels: bool = False
 
 
 def reconstruct_voxel_labels(
@@ -97,6 +98,7 @@ def reconstruct_labels_for_survey(
 	metadata_path: str | Path | None = None,
 	output_dir: str | Path | None = None,
 	write_voxel_labels: bool = True,
+	skip_existing_voxel_labels: bool = False,
 ) -> ReconstructedLabels:
 	"""Load one token-label artifact and optionally write voxel labels."""
 	token_path = Path(token_labels_path)
@@ -106,21 +108,30 @@ def reconstruct_labels_for_survey(
 	patch = _metadata_xyz(metadata, 'patch_size', default=(1, 1, 1))
 	volume_shape = resolve_volume_shape_xyz(metadata, labels.shape, patch)
 	voxel_path = None
+	skipped_existing = False
 	if write_voxel_labels:
 		root = token_path.parent if output_dir is None else Path(output_dir)
 		voxel_path = root / f'{survey_id}.cluster_labels_voxel.npy'
-		reconstruct_voxel_labels(
-			labels,
-			patch_size_xyz=patch,
-			volume_shape_xyz=volume_shape,
-			output_path=voxel_path,
-		)
+		if skip_existing_voxel_labels and voxel_path.is_file():
+			_validate_existing_voxel_labels(
+				voxel_path,
+				volume_shape_xyz=volume_shape,
+			)
+			skipped_existing = True
+		else:
+			reconstruct_voxel_labels(
+				labels,
+				patch_size_xyz=patch,
+				volume_shape_xyz=volume_shape,
+				output_path=voxel_path,
+			)
 	return ReconstructedLabels(
 		survey_id=survey_id,
 		token_labels_path=token_path,
 		voxel_labels_path=voxel_path,
 		token_shape_xyz=cast('XYZ', tuple(int(axis) for axis in labels.shape)),
 		voxel_shape_xyz=volume_shape if write_voxel_labels else None,
+		skipped_existing_voxel_labels=skipped_existing,
 	)
 
 
@@ -193,6 +204,21 @@ def _validate_token_labels(labels: np.ndarray) -> np.ndarray:
 		msg = f'token labels must use an integer dtype; got {array.dtype}'
 		raise TypeError(msg)
 	return array
+
+
+def _validate_existing_voxel_labels(
+	path: Path,
+	*,
+	volume_shape_xyz: XYZ,
+) -> None:
+	array = np.load(path, mmap_mode='r')
+	if array.shape != volume_shape_xyz or array.dtype != np.dtype(np.int32):
+		msg = (
+			'incompatible existing voxel labels; expected '
+			f'shape={volume_shape_xyz!r} and dtype=int32, got '
+			f'shape={array.shape!r} and dtype={array.dtype} at {path}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_positive_xyz(value: Sequence[int], name: str) -> XYZ:
